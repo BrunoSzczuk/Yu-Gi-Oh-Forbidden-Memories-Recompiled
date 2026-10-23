@@ -460,11 +460,8 @@ static void monster_effect_type_overflow(void)
     assert(effect_notes == before + 1);
 }
 
-/* Cards_Reference reads Json_Number's long before Cards_Valid's int: a
- * reference far past int range must not wrap into a valid card id (card 1,
- * from 2^32 + 1 narrowed to 1 on a typical 64-bit build). */
 /* "model" naming a mod's model (API 21): a replace's and a copy's, its
- * record, its base's stats for the game and its stars for a monster made
+ * sector and window, its base's stats for the game and its stars for a monster made
  * from a magic card; an unknown name is refused, a disc monster still taken. */
 static void mod_models(void)
 {
@@ -509,6 +506,9 @@ static void mod_models(void)
     Json_Free(model_bases[0]);
 }
 
+/* Cards_Reference reads Json_Number's long before Cards_Valid's int: a
+ * reference far past int range must not wrap into a valid card id (card 1,
+ * from 2^32 + 1 narrowed to 1 on a typical 64-bit build). */
 static void reference_overflow(void)
 {
     char error[128];

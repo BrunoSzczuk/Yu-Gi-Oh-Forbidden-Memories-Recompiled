@@ -661,7 +661,8 @@ replaced card of the disc may take one too (`"replace": 1, "model":
   the game looks a model up as a card: the battle's opening and the attack's
   sound treat a Spellcaster base differently, and a card made a monster
   without `stars` takes the base's guardian stars (the Sun and the Moon
-  without one).
+  without one). A model without a `base` is looked up as Blue-eyes White
+  Dragon (card 1).
 
 A mod may add as many models as it likes: up to 32,767 in all, past which a
 model id no longer fits (`CARDS_MODEL_MOD_FIRST`, `src/pc/cards/cards.h`).
@@ -669,7 +670,9 @@ Nothing of the disc moves for them: a model's record stays in its mod's
 file and is read from there when it is wanted, by the battle (into a window
 of two records past the disc's end, one for each battle slot, which the
 drive reads as it reads `MODEL.MRG`) and by 3D Monsters. A mod that replaces
-`MODEL.MRG` whole (`data`) leaves them alone.
+`MODEL.MRG` whole (`data`) leaves them alone. A model whose file is gone or
+has changed since the game started fights as its `base` (as Blue-eyes
+without one) and is not drawn by 3D Monsters, until the next launch.
 
 Like data overrides, a mod with models needs a restart. Models take their
 places in the order the mods load, so a model's place is not fixed from one

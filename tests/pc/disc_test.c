@@ -114,11 +114,12 @@ static int inspect_startup(const char *directory, unsigned rank, int (*part)(con
 static void unload_pack(void) {}
 
 /* "models": two records of a mod's own, read from its files into the battle
- * slots' windows past the disc, which the drive reads; a file larger than a
- * record is refused, and MODEL.MRG, here replaced whole, does not move. */
+ * slots' windows past the disc and the files it relocates, which the drive
+ * reads; a file larger than a record is refused, and one changed since
+ * startup is not read. */
 static int models_case(void)
 {
-    static unsigned char one[RECORD], two[RECORD / 2], big[RECORD + 1], got[2048];
+    static unsigned char one[RECORD], two[RECORD / 2], big[RECORD + 1], whole[2 * RECORD + 2048], got[2048];
     const char *name;
     char path[1024];
     int lba, mod, window, *windows;
@@ -131,11 +132,12 @@ static int models_case(void)
     write_file("mods/m-models/two.bin", two, sizeof(two));
     manifest("n-big", "{\"enabled\":true,\"models\":[{\"name\":\"big\",\"file\":\"big.bin\"}]}");
     write_file("mods/n-big/big.bin", big, sizeof(big));   /* one byte past a record */
-    /* Loaded after them, MODEL.MRG replaced whole by one sector: the windows
-       stay the models'. */
+    /* Loaded after them, MODEL.MRG replaced whole by a larger file, which
+       moves past the disc's end: the windows follow it, and stay the
+       models'. */
     manifest("o-whole", "{\"enabled\":true,\"data\":[{\"file\":\"\\\\DATA\\\\MODEL.MRG;1\",\"replace\":\"model.bin\"}]}");
-    memset(got, 0x77, sizeof(got));
-    write_file("mods/o-whole/model.bin", got, sizeof(got));
+    memset(whole, 0x77, sizeof(whole));
+    write_file("mods/o-whole/model.bin", whole, sizeof(whole));
     snprintf(path, sizeof(path), "%s/mods", root); assert(!setenv("MEMORIES_MODS_DIR", path, 1));
     assert(!setenv("MEMORIES_USER_DIR", root, 1));
     snprintf(path, sizeof(path), "%s/settings", root); assert(!setenv("MEMORIES_SETTINGS", path, 1));
@@ -148,12 +150,12 @@ static int models_case(void)
     assert(Mods_Model(2, NULL, NULL, NULL) == -1);
     assert(Mods_ModelSector(0) == 0x1000000 && Mods_ModelSector(1) == 0x1000000 + 0x114);
     assert(Mods_ModelSector(2) == -1 && Mods_ModelSector(-1) == -1);
-    /* MODEL.MRG keeps its disc place: o-whole's one sector there. */
-    assert(!Memories_DiscFileInfo("\\DATA\\MODEL.MRG;1", &lba, &bytes) && lba == 20);
-    assert(Memories_DiscReadSectors(20, 1, got) == 1 && got[0] == 0x77);
-    /* Each slot's window, after the disc's 600 sectors. */
+    /* o-whole's MODEL.MRG, past the disc's 600 sectors, and each slot's
+       window after it and its guard sector. */
+    assert(!Memories_DiscFileInfo("\\DATA\\MODEL.MRG;1", &lba, &bytes) && lba == 600 && bytes == sizeof(whole));
+    assert(Memories_DiscReadSectors(lba + 2 * 0x114, 1, got) == 1 && got[0] == 0x77);
     window = Mods_ModelWindow(0, 1);
-    assert(window == 600 && Mods_ModelWindow(1, 0) == window + 0x114);
+    assert(window == lba + 2 * 0x114 + 1 + 1 && Mods_ModelWindow(1, 0) == window + 0x114);
     assert(Memories_DiscReadSectors(window + 5, 1, got) == 1 && got[0] == 6);              /* two */
     assert(Memories_DiscReadSectors(window + 0x113, 1, got) == 1 && got[0] == 0);          /* past its file */
     assert(Memories_DiscReadSectors(window + 0x114 + 7, 1, got) == 1 && got[0] == 0x11);   /* one */
@@ -165,6 +167,15 @@ static int models_case(void)
     windows[0] = 1;
     Mods_ModelRebind();
     assert(Memories_DiscReadSectors(window + 5, 1, got) == 1 && got[0] == 6);
+    /* A model file changed since startup, in its bytes or its size, is not
+       read: the window is zeros and the loader takes the model's base. */
+    two[5 * 2048] = 0x55;
+    write_file("mods/m-models/two.bin", two, sizeof(two));
+    assert(Mods_ModelWindow(0, 1) == -1 && windows[0] == -1);
+    assert(Memories_DiscReadSectors(window + 5, 1, got) == 1 && got[0] == 0);
+    write_file("mods/m-models/two.bin", two, sizeof(two) - 1);
+    assert(Mods_ModelWindow(0, 1) == -1);
+    assert(Mods_ModelWindow(0, 0) == window);   /* the other model still reads */
     Mods_Shutdown();
     return 0;
 }

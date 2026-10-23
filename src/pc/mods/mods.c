@@ -684,12 +684,15 @@ static int layout_disc_files(void)
 }
 
 /* Sectors first to first + count of model `model`'s record, from its file;
- * a file shorter than the record reads as zeros past its end. */
+ * a file shorter than the record reads as zeros past its end. 0 when the
+ * file cannot be read or is no longer the size it had at startup (a mod
+ * updated in place is used from the next launch, as its other files are). */
 static int read_model(int model, int first, int count, unsigned char *out)
 {
     size_t at = (size_t)first * SECTOR, want = (size_t)count * SECTOR, have = 0, got = 0;
+    struct stat info;
     int file;
-    if (model < 0 || model >= model_count || first < 0 || count <= 0 ||
+    if (model < 0 || model >= model_count || !models[model].path || first < 0 || count <= 0 ||
         count > MODEL_RECORD_SECTORS - first) return 0;
 #ifdef _WIN32
     file = open(models[model].path, O_RDONLY | O_BINARY);
@@ -697,6 +700,10 @@ static int read_model(int model, int first, int count, unsigned char *out)
     file = open(models[model].path, O_RDONLY);
 #endif
     if (file < 0) return 0;
+    if (fstat(file, &info) || (uint64_t)info.st_size != models[model].size) {
+        close(file);
+        return 0;
+    }
     if (at < models[model].size) {
         have = models[model].size - at < want ? models[model].size - at : want;
         if (lseek(file, (off_t)at, SEEK_SET) != (off_t)at) have = SIZE_MAX;
@@ -719,7 +726,7 @@ static int read_model(int model, int first, int count, unsigned char *out)
 int Mods_ModelCount(void) { return model_count; }
 int Mods_Model(int i, const char **name, const JsonValue **base, int *mod)
 {
-    if (i < 0 || i >= model_count) return -1;
+    if (i < 0 || i >= model_count || !models[i].path) return -1;
     if (name) *name = models[i].name;
     if (base) *base = models[i].base;
     if (mod) *mod = models[i].mod;
@@ -728,15 +735,20 @@ int Mods_Model(int i, const char **name, const JsonValue **base, int *mod)
 
 int Mods_ModelSector(int i)
 {
-    return i >= 0 && i < model_count ? MODEL_SECTORS + i * MODEL_RECORD_SECTORS : -1;
+    return i >= 0 && i < model_count && models[i].path ? MODEL_SECTORS + i * MODEL_RECORD_SECTORS : -1;
 }
 
 int Mods_ModelWindow(int slot, int i)
 {
     if (slot < 0 || slot >= MODEL_WINDOWS || window_lba < 0 || !window_data[slot]) return -1;
     window_model[slot] = -1;
-    if (!read_model(i, 0, MODEL_RECORD_SECTORS, window_data[slot])) {
-        say("model %d: cannot read %s", i, i >= 0 && i < model_count ? models[i].path : "(none)");
+    /* The record as it was at startup, or nothing: the caller then loads
+     * another, and a transfer a save state resumes reads zeros. */
+    if (!read_model(i, 0, MODEL_RECORD_SECTORS, window_data[slot]) ||
+        hash_bytes(2166136261u, window_data[slot], models[i].size) != models[i].hash) {
+        memset(window_data[slot], 0, (size_t)MODEL_RECORD_SECTORS * SECTOR);
+        say("model %d: %s cannot be read as it was at startup", i,
+            i >= 0 && i < model_count && models[i].path ? models[i].path : "(none)");
         return -1;
     }
     window_model[slot] = i;
@@ -812,11 +824,13 @@ unsigned Mods_DiscSignature(void)
     int relocated = 0;
     for (int i = 0; i < disc_file_count; i++) relocated |= disc_files[i].reserved != 0;
     if (!region_count && !patch_count && !relocated && !model_count) return 0;
-    for (int i = 0; i < model_count; i++) {
-        hash = hash_bytes(hash, &models[i].hash, sizeof(models[i].hash));
-        hash = hash_bytes(hash, &models[i].size, sizeof(models[i].size));
+    if (model_count) {   /* without models the signature is the one it always was */
+        for (int i = 0; i < model_count; i++) {
+            hash = hash_bytes(hash, &models[i].hash, sizeof(models[i].hash));
+            hash = hash_bytes(hash, &models[i].size, sizeof(models[i].size));
+        }
+        hash = hash_bytes(hash, &window_lba, sizeof(window_lba));
     }
-    hash = hash_bytes(hash, &window_lba, sizeof(window_lba));
     for (int i = 0; i < disc_file_count; i++) {
         const DiscFile *file = &disc_files[i];
         hash = hash_bytes(hash, &file->retail_lba, sizeof(file->retail_lba));
@@ -927,12 +941,17 @@ static void drop_overrides(int mod)
         free(patches[i].bytes);
     }
     patch_count = kept;
+    /* Once the disc's layout is frozen the cards have taken the models'
+     * places (Cards_ModelId): a dropped mod's models stay in the list, with
+     * no file, so that no other mod's moves; they load as their bases. */
     for (i = 0, kept = 0; i < model_count; i++) {
         if (models[i].mod != mod) { models[kept++] = models[i]; continue; }
+        for (int slot = 0; slot < MODEL_WINDOWS; slot++) if (window_model[slot] == i) window_model[slot] = -1;
         free(models[i].path);
+        models[i].path = NULL;
+        if (disc_layout_frozen) kept++;
     }
     model_count = kept;
-    window_model[0] = window_model[1] = -1;
     publish_overrides();
 }
 
@@ -1142,13 +1161,14 @@ static int add_model(Mod *mod, int index, const JsonValue *entry, int at)
         model_capacity = capacity;
     }
     for (int slot = 0; slot < MODEL_WINDOWS; slot++)
-        if (!window_data[slot] && !(window_data[slot] = malloc((size_t)MODEL_RECORD_SECTORS * SECTOR))) {
+        if (!window_data[slot] && !(window_data[slot] = calloc(MODEL_RECORD_SECTORS, SECTOR))) {
             unmap_file(image, (size_t)info.st_size);
             return 0;
         }
     for (int i = 0; i < model_count; i++)
         if (!strcmp(models[i].name, name)) {
-            warn(mod, 0, "model %s is also %s's; the later one wins", name, mods[models[i].mod].id);
+            if (models[i].mod == index) warn(mod, 0, "two models are named %s; the later one wins", name);
+            else warn(mod, 0, "model %s is also %s's; the later one wins", name, mods[models[i].mod].id);
             break;
         }
     models[model_count].mod = index;
