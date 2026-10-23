@@ -191,6 +191,13 @@ static int models_case(void)
     assert(Mods_ModelWindow(0, 1) == -1 && Mods_ModelRead(0x1000000 + 0x114, 1, got) == 0);
     assert(Mods_ModelWindow(0, 0) == window);   /* the other model still reads */
     assert(Mods_ModelRead(0x1000000 + 7, 1, got) == 1 && got[0] == 0x11);
+    /* A file gone is stale too (one that cannot be opened for another
+       reason is tried again: a scanner may be holding it). */
+    snprintf(path, sizeof(path), "%s/mods/m-models/one.bin", root);
+    assert(!remove(path));
+    assert(Mods_ModelRead(0x1000000 + 7, 1, got) == 0 && Mods_ModelSector(0) == -1);
+    write_file("mods/m-models/one.bin", one, sizeof(one));
+    assert(Mods_ModelWindow(0, 0) == -1);
     Mods_Shutdown();
     return 0;
 }

@@ -135,9 +135,10 @@ unsigned Mods_DiscSignature(void);
  * the game looks a model up as a card, or NULL) and its mod: 0, or -1 past
  * the last. src/pc/cards/cards.c names them.
  * Mods_ModelSector: the first sector of its record as a native extra reads
- * it (host->disc_read, which Mods_ModelRead serves: `sectors` from `lba`
- * on, within one record, or 0 when its file is not what it was at startup),
- * or -1, as it is once its file was found changed, until the next launch.
+ * it (host->disc_read), or -1. Once its file is found gone or changed it
+ * is -1 until the next launch. Mods_ModelRead serves host->disc_read:
+ * `sectors` from `lba` on, within one record, or 0 when its file cannot be
+ * read as it was at startup.
  * Mods_ModelWindow: reads it into battle slot
  * `slot`'s window (0 or 1), where the drive finds it, and gives the window's
  * first sector, or -1; only while no transfer runs (Model_LoadMonsterMerge

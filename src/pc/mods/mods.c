@@ -41,6 +41,7 @@
 #include "pc/sdk/disc.h"
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -152,7 +153,7 @@ typedef struct {
     const JsonValue *base;
     char *path;
     unsigned size, hash;
-    int stale;   /* its file was found changed: not read again until the next launch */
+    int stale;   /* its file was found gone or changed: not read again until the next launch */
 } ModModel;
 static ModModel *models;
 static int model_count, model_capacity;
@@ -701,14 +702,19 @@ static int read_record(int model, unsigned char *out)
     struct stat info;
     int file;
     if (model < 0 || model >= model_count || !models[model].path || models[model].stale) return 0;
-    models[model].stale = 1;   /* until it reads as it was */
 #ifdef _WIN32
     file = open(models[model].path, O_RDONLY | O_BINARY);
 #else
     file = open(models[model].path, O_RDONLY);
 #endif
-    if (file < 0) return 0;
+    /* Gone, another size or other bytes: stale. Not opened or not read
+     * whole (a scanner holding the file): tried again next time. */
+    if (file < 0) {
+        if (errno == ENOENT) models[model].stale = 1;
+        return 0;
+    }
     if (fstat(file, &info) || (uint64_t)info.st_size != models[model].size) {
+        if (!fstat(file, &info) && (uint64_t)info.st_size != models[model].size) models[model].stale = 1;
         close(file);
         return 0;
     }
@@ -723,9 +729,12 @@ static int read_record(int model, unsigned char *out)
         got += (size_t)chunk;
     }
     close(file);
-    if (got < size || hash_bytes(2166136261u, out, size) != models[model].hash) return 0;
+    if (got < size) return 0;
+    if (hash_bytes(2166136261u, out, size) != models[model].hash) {
+        models[model].stale = 1;
+        return 0;
+    }
     memset(out + size, 0, (size_t)MODEL_RECORD_SECTORS * SECTOR - size);
-    models[model].stale = 0;
     return 1;
 }
 
