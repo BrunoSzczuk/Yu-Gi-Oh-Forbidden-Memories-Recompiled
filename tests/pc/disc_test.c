@@ -169,13 +169,28 @@ static int models_case(void)
     assert(Memories_DiscReadSectors(window + 5, 1, got) == 1 && got[0] == 6);
     /* A model file changed since startup, in its bytes or its size, is not
        read: the window is zeros and the loader takes the model's base. */
+    /* A native extra reads a model at its sector, within its record. */
+    assert(Mods_ModelRead(0x1000000 + 0x114 + 5, 1, got) == 1 && got[0] == 6);
+    assert(Mods_ModelRead(0x1000000 + 0x113, 4, got) == 1 && got[0] == 0x11);
     two[5 * 2048] = 0x55;
     write_file("mods/m-models/two.bin", two, sizeof(two));
     assert(Mods_ModelWindow(0, 1) == -1 && windows[0] == -1);
     assert(Memories_DiscReadSectors(window + 5, 1, got) == 1 && got[0] == 0);
+    /* Nor by a native extra, whatever sectors it asks for (3D Monsters
+       parsed a changed record of the same size and crashed). */
+    assert(Mods_ModelRead(0x1000000 + 0x114 + 5, 1, got) == 0);
+    assert(Mods_ModelRead(0x1000000 + 0x114 + 100, 1, got) == 0);
+    /* Once found changed, it has no sector (3D Monsters then stops asking
+       every frame) and is not read again until the next launch, even with
+       its file put back. */
+    assert(Mods_ModelSector(1) == -1 && Mods_ModelSector(0) == 0x1000000);
+    two[5 * 2048] = 6;
+    write_file("mods/m-models/two.bin", two, sizeof(two));
+    assert(Mods_ModelWindow(0, 1) == -1 && Mods_ModelRead(0x1000000 + 0x114 + 5, 1, got) == 0);
     write_file("mods/m-models/two.bin", two, sizeof(two) - 1);
-    assert(Mods_ModelWindow(0, 1) == -1);
+    assert(Mods_ModelWindow(0, 1) == -1 && Mods_ModelRead(0x1000000 + 0x114, 1, got) == 0);
     assert(Mods_ModelWindow(0, 0) == window);   /* the other model still reads */
+    assert(Mods_ModelRead(0x1000000 + 7, 1, got) == 1 && got[0] == 0x11);
     Mods_Shutdown();
     return 0;
 }

@@ -10,7 +10,8 @@ playing Blue-eyes face up and attacking with it:
     disc    Blue-eyes takes Dark Magician's own ("model": "Dark Magician")
     none    Blue-eyes as it is
     changed as mod, but the model's file changes once the game is up: the
-            battle does not hang, and loads the model's base (Dark Magician)
+            battle does not hang, and loads the model's base (Dark Magician);
+            3D Monsters does not load it (a changed record crashed its parse)
 
 The mod's record is read from its file: by 3D Monsters directly, and by the
 battle through the slot's window past the disc. So in mod and disc 3D
@@ -182,9 +183,10 @@ def main():
     assert mod["battle"] == same["battle"], "the mod's model fights differently from the disc's"
     assert "cannot be read as it was at startup" in changed["log"], "the changed model file was read"
     assert changed.get("data") == same["data"], "a model that cannot be read did not fight as its base"
+    assert f"card {MOD_MODEL_CARD} stance" not in changed["log"], "3D Monsters loaded the changed model file"
     slot = mod["slot"]
     print(f"mod models: the mod's record stands on the field and fights in battle slot {slot} as the disc's, "
-          f"and a changed file fights as its base; "
+          f"and a changed file fights as its base and is not drawn; "
           f"{args.output}")
 
 

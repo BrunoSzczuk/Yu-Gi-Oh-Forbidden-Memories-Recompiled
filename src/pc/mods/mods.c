@@ -152,6 +152,7 @@ typedef struct {
     const JsonValue *base;
     char *path;
     unsigned size, hash;
+    int stale;   /* its file was found changed: not read again until the next launch */
 } ModModel;
 static ModModel *models;
 static int model_count, model_capacity;
@@ -352,12 +353,17 @@ static int host_disc_read(const MemoriesModHost *host, int lba, int sectors, voi
 {
     (void)host;
     if (!out || sectors <= 0) return 0;
-    if (lba >= MODEL_SECTORS) {   /* a mod's model (Mods_ModelSector), read from its file */
-        int first = (lba - MODEL_SECTORS) % MODEL_RECORD_SECTORS;
-        if (sectors > MODEL_RECORD_SECTORS - first) sectors = MODEL_RECORD_SECTORS - first;
-        return read_model((lba - MODEL_SECTORS) / MODEL_RECORD_SECTORS, first, sectors, out);
-    }
+    if (lba >= MODEL_SECTORS) return Mods_ModelRead(lba, sectors, out);
     return Memories_DiscReadSectors(lba, sectors, out);
+}
+
+int Mods_ModelRead(int lba, int sectors, void *out)
+{
+    int first;
+    if (!out || sectors <= 0 || lba < MODEL_SECTORS) return 0;
+    first = (lba - MODEL_SECTORS) % MODEL_RECORD_SECTORS;
+    if (sectors > MODEL_RECORD_SECTORS - first) sectors = MODEL_RECORD_SECTORS - first;
+    return read_model((lba - MODEL_SECTORS) / MODEL_RECORD_SECTORS, first, sectors, out);
 }
 
 unsigned short (*Mods_PadSource)(int port);
@@ -683,17 +689,19 @@ static int layout_disc_files(void)
     return 1;
 }
 
-/* Sectors first to first + count of model `model`'s record, from its file;
- * a file shorter than the record reads as zeros past its end. 0 when the
- * file cannot be read or is no longer the size it had at startup (a mod
- * updated in place is used from the next launch, as its other files are). */
-static int read_model(int model, int first, int count, unsigned char *out)
+/* Model `model`'s whole record, from its file, into `out` (a record's
+ * bytes); a file shorter than the record reads as zeros past its end. 0
+ * when the file cannot be read or is no longer what it was at startup, its
+ * size or its bytes (a mod updated in place is used from the next launch,
+ * as its other files are): a parser is never handed a record that changed
+ * under it. */
+static int read_record(int model, unsigned char *out)
 {
-    size_t at = (size_t)first * SECTOR, want = (size_t)count * SECTOR, have = 0, got = 0;
+    size_t size, got = 0;
     struct stat info;
     int file;
-    if (model < 0 || model >= model_count || !models[model].path || first < 0 || count <= 0 ||
-        count > MODEL_RECORD_SECTORS - first) return 0;
+    if (model < 0 || model >= model_count || !models[model].path || models[model].stale) return 0;
+    models[model].stale = 1;   /* until it reads as it was */
 #ifdef _WIN32
     file = open(models[model].path, O_RDONLY | O_BINARY);
 #else
@@ -704,23 +712,36 @@ static int read_model(int model, int first, int count, unsigned char *out)
         close(file);
         return 0;
     }
-    if (at < models[model].size) {
-        have = models[model].size - at < want ? models[model].size - at : want;
-        if (lseek(file, (off_t)at, SEEK_SET) != (off_t)at) have = SIZE_MAX;
-        while (have != SIZE_MAX && got < have) {
+    size = models[model].size;
+    while (got < size) {
 #ifdef _WIN32
-            int chunk = _read(file, out + got, (unsigned)(have - got));
+        int chunk = _read(file, out + got, (unsigned)(size - got));
 #else
-            ssize_t chunk = read(file, out + got, have - got);
+        ssize_t chunk = read(file, out + got, size - got);
 #endif
-            if (chunk <= 0) break;
-            got += (size_t)chunk;
-        }
+        if (chunk <= 0) break;
+        got += (size_t)chunk;
     }
     close(file);
-    if (got < have) return 0;
-    memset(out + got, 0, want - got);
-    return count;
+    if (got < size || hash_bytes(2166136261u, out, size) != models[model].hash) return 0;
+    memset(out + size, 0, (size_t)MODEL_RECORD_SECTORS * SECTOR - size);
+    models[model].stale = 0;
+    return 1;
+}
+
+/* Sectors first to first + count of model `model`'s record, as read_record
+ * reads it; 0 when it cannot. */
+static int read_model(int model, int first, int count, unsigned char *out)
+{
+    unsigned char *record;
+    int ok;
+    if (first < 0 || count <= 0 || count > MODEL_RECORD_SECTORS - first) return 0;
+    if (first == 0 && count == MODEL_RECORD_SECTORS) return read_record(model, out) ? count : 0;
+    if (!(record = malloc((size_t)MODEL_RECORD_SECTORS * SECTOR))) return 0;
+    ok = read_record(model, record);
+    if (ok) memcpy(out, record + (size_t)first * SECTOR, (size_t)count * SECTOR);
+    free(record);
+    return ok ? count : 0;
 }
 
 int Mods_ModelCount(void) { return model_count; }
@@ -735,7 +756,7 @@ int Mods_Model(int i, const char **name, const JsonValue **base, int *mod)
 
 int Mods_ModelSector(int i)
 {
-    return i >= 0 && i < model_count && models[i].path ? MODEL_SECTORS + i * MODEL_RECORD_SECTORS : -1;
+    return i >= 0 && i < model_count && models[i].path && !models[i].stale ? MODEL_SECTORS + i * MODEL_RECORD_SECTORS : -1;
 }
 
 int Mods_ModelWindow(int slot, int i)
@@ -744,8 +765,7 @@ int Mods_ModelWindow(int slot, int i)
     window_model[slot] = -1;
     /* The record as it was at startup, or nothing: the caller then loads
      * another, and a transfer a save state resumes reads zeros. */
-    if (!read_model(i, 0, MODEL_RECORD_SECTORS, window_data[slot]) ||
-        hash_bytes(2166136261u, window_data[slot], models[i].size) != models[i].hash) {
+    if (!read_record(i, window_data[slot])) {
         memset(window_data[slot], 0, (size_t)MODEL_RECORD_SECTORS * SECTOR);
         say("model %d: %s cannot be read as it was at startup", i,
             i >= 0 && i < model_count && models[i].path ? models[i].path : "(none)");
@@ -1176,6 +1196,7 @@ static int add_model(Mod *mod, int index, const JsonValue *entry, int at)
     models[model_count].base = Json_Member(entry, "base");
     models[model_count].size = (unsigned)info.st_size;
     models[model_count].hash = hash_bytes(2166136261u, image, (size_t)info.st_size);
+    models[model_count].stale = 0;
     unmap_file(image, (size_t)info.st_size);
     if (!(models[model_count].path = strdup(path))) return 0;
     model_count++;
