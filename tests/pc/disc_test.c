@@ -113,15 +113,15 @@ static int inspect_startup(const char *directory, unsigned rank, int (*part)(con
 }
 static void unload_pack(void) {}
 
-/* "models": two records appended to MODEL.MRG after the disc's two, served
- * from the mod while the disc's still come from the disc; a file larger
- * than a record is refused. */
+/* "models": two records of a mod's own, read from its files into the battle
+ * slots' windows past the disc, which the drive reads; a file larger than a
+ * record is refused, and MODEL.MRG, here replaced whole, does not move. */
 static int models_case(void)
 {
     static unsigned char one[RECORD], two[RECORD / 2], big[RECORD + 1], got[2048];
     const char *name;
     char path[1024];
-    int lba, mod;
+    int lba, mod, window, *windows;
     unsigned bytes;
     memset(one, 0x11, sizeof(one));
     for (size_t i = 0; i < sizeof(two); i++) two[i] = (unsigned char)(i / 2048 + 1);
@@ -131,8 +131,8 @@ static int models_case(void)
     write_file("mods/m-models/two.bin", two, sizeof(two));
     manifest("n-big", "{\"enabled\":true,\"models\":[{\"name\":\"big\",\"file\":\"big.bin\"}]}");
     write_file("mods/n-big/big.bin", big, sizeof(big));   /* one byte past a record */
-    /* Loaded after them, MODEL.MRG replaced whole by one sector: the added
-       records stay theirs. */
+    /* Loaded after them, MODEL.MRG replaced whole by one sector: the windows
+       stay the models'. */
     manifest("o-whole", "{\"enabled\":true,\"data\":[{\"file\":\"\\\\DATA\\\\MODEL.MRG;1\",\"replace\":\"model.bin\"}]}");
     memset(got, 0x77, sizeof(got));
     write_file("mods/o-whole/model.bin", got, sizeof(got));
@@ -143,18 +143,28 @@ static int models_case(void)
     assert(Mods_Active(find("m-models")) && Mods_RequiresRestart(find("m-models")));
     assert(!Mods_Active(find("n-big")) && strstr(Mods_Status(find("n-big")), "model record"));
     assert(Mods_ModelCount() == 2);
-    assert(Mods_Model(0, &name, NULL, &mod) == 2 && !strcmp(name, "one") && mod == find("m-models"));
-    assert(Mods_Model(1, &name, NULL, NULL) == 3 && !strcmp(name, "two"));
+    assert(!Mods_Model(0, &name, NULL, &mod) && !strcmp(name, "one") && mod == find("m-models"));
+    assert(!Mods_Model(1, &name, NULL, NULL) && !strcmp(name, "two"));
     assert(Mods_Model(2, NULL, NULL, NULL) == -1);
-    assert(!Memories_DiscFileInfo("\\DATA\\MODEL.MRG;1", &lba, &bytes) && bytes == 4 * RECORD && lba >= 600);
-    assert(Memories_DiscReadSectors(lba, 1, got) == 1 && got[0] == 0x77);                    /* o-whole's */
-    assert(Memories_DiscReadSectors(lba + 1, 1, got) == 1 && got[0] == 0);                   /* past it */
-    /* At the file's disc place the whole replacement, as for CARD.MRG, and
-       never an added record. */
+    assert(Mods_ModelSector(0) == 0x1000000 && Mods_ModelSector(1) == 0x1000000 + 0x114);
+    assert(Mods_ModelSector(2) == -1 && Mods_ModelSector(-1) == -1);
+    /* MODEL.MRG keeps its disc place: o-whole's one sector there. */
+    assert(!Memories_DiscFileInfo("\\DATA\\MODEL.MRG;1", &lba, &bytes) && lba == 20);
     assert(Memories_DiscReadSectors(20, 1, got) == 1 && got[0] == 0x77);
-    assert(Memories_DiscReadSectors(lba + 2 * 0x114, 1, got) == 1 && got[0] == 0x11);        /* one */
-    assert(Memories_DiscReadSectors(lba + 3 * 0x114 + 5, 1, got) == 1 && got[0] == 6);       /* two */
-    assert(Memories_DiscReadSectors(lba + 3 * 0x114 + 0x113, 1, got) == 1 && got[0] == 0);   /* past its file */
+    /* Each slot's window, after the disc's 600 sectors. */
+    window = Mods_ModelWindow(0, 1);
+    assert(window == 600 && Mods_ModelWindow(1, 0) == window + 0x114);
+    assert(Memories_DiscReadSectors(window + 5, 1, got) == 1 && got[0] == 6);              /* two */
+    assert(Memories_DiscReadSectors(window + 0x113, 1, got) == 1 && got[0] == 0);          /* past its file */
+    assert(Memories_DiscReadSectors(window + 0x114 + 7, 1, got) == 1 && got[0] == 0x11);   /* one */
+    assert(Mods_ModelWindow(0, 0) == window && Memories_DiscReadSectors(window + 5, 1, got) == 1 && got[0] == 0x11);
+    assert(Mods_ModelWindow(0, 2) == -1 && Mods_ModelWindow(2, 0) == -1);
+    /* What save states carry, and reading it back after a load. */
+    windows = Mods_ModelWindows(&bytes);
+    assert(bytes == 2 * sizeof(int) && windows[0] == -1 && windows[1] == 0);
+    windows[0] = 1;
+    Mods_ModelRebind();
+    assert(Memories_DiscReadSectors(window + 5, 1, got) == 1 && got[0] == 6);
     Mods_Shutdown();
     return 0;
 }

@@ -663,16 +663,17 @@ replaced card of the disc may take one too (`"replace": 1, "model":
   without `stars` takes the base's guardian stars (the Sun and the Moon
   without one).
 
-With the US disc there is room for about 200 added models in all: adding
-any moves the whole of `MODEL.MRG` past the disc's end, and the drive's
-addresses stop at 99:59:74. A mod past that is refused whole. A mod that
-replaces `MODEL.MRG` whole (`data`) still has the added records after the
-disc's 621: they are read from their mods whatever the order.
+A mod may add as many models as it likes: up to 32,767 in all, past which a
+model id no longer fits (`CARDS_MODEL_MOD_FIRST`, `src/pc/cards/cards.h`).
+Nothing of the disc moves for them: a model's record stays in its mod's
+file and is read from there when it is wanted, by the battle (into a window
+of two records past the disc's end, one for each battle slot, which the
+drive reads as it reads `MODEL.MRG`) and by 3D Monsters. A mod that replaces
+`MODEL.MRG` whole (`data`) leaves them alone.
 
-Like data overrides, a mod with models needs a restart. Its records are
-added after the disc's in the order the mods load, so a model's place is
-not fixed from one set of mods to the next: cards name models, never their
-places.
+Like data overrides, a mod with models needs a restart. Models take their
+places in the order the mods load, so a model's place is not fixed from one
+set of mods to the next: cards name models, never their places.
 
 ### The record
 
