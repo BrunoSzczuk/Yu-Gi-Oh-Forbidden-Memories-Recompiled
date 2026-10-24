@@ -158,6 +158,24 @@ FF decrements stream depth:
 FF is therefore both a nested-stream return and the final terminator. Calling
 it simply “end” is accurate only for the outermost stream.
 
+## A text that never ends
+
+A box that has ended its text posts `TEXT_BOX_FLAG_DONE`, either because the
+stream ended (`Text_EndStream`) or because every letter has been printed
+(`TextBox_BuildStep`). The name entry waits for that flag before it goes on
+(`src/overlays/password/name_entry_dialog.c`).
+
+A community image holds its own text, and the retail code asks for a string
+by id: the string it gets is the image's string at that id, and the image's
+strings are not the retail's. One of them has no end of its own, so the box
+prints its letters, stops, and never finishes, and the name entry waits for a
+text that will never be done. The wait is bounded now
+(`src/pc/text/message_wait.c`, `tests/pc/message_wait_test.c`): a box that has
+printed nothing for two seconds, once the player has asked for the message to
+go on, is left behind, and so is a wait that has lasted thirty seconds. A box
+whose text has ended is never given up on, so the retail's own frames are the
+ones it always had.
+
 ## States that read operands
 
 F7 itself takes one byte, but four of the states it can set read operands
