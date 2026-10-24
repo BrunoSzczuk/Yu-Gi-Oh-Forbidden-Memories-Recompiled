@@ -11,7 +11,7 @@ that is off or does not load any more ([Mod manager](mods-window.md)).
 
 | Directory | What is in it |
 |---|---|
-| `mods/` beside the executable | the mods the release ships (`3d-monsters`, `hand-camera`, `ai-hard-mode`, `yamyi-mods`, `drop-missing-cards`) |
+| `mods/` beside the executable | the mods the release ships (`3d-monsters`, `hand-camera`, `ai-hard-mode`, `yamyi-mods`, `drop-missing-cards`, `kuriboh-card-effects`) |
 | `mods/` in the user directory | mods the player installed |
 
 The user directory is where everything the player owns lives: settings,
@@ -2370,6 +2370,7 @@ the reason beside any that failed to load.
 | `mods/ai-hard-mode` | optional stronger opponent decisions |
 | `mods/yamyi-mods` | return-to-title confirmation and Library drop odds, with independent switches |
 | `mods/drop-missing-cards` | off by default: gives the 82 cards no duelist drops a duelist to win them from, as the old static recomp's option did; a data-only `drops` table |
+| `mods/kuriboh-card-effects` | off by default: gives Cyber Angel Vrash, a card the Kuriboh Evolution image adds, the +500 ATK its own text promises, which the image never implements; a data-only `cards` table, naming the card it changes, so with another disc it finds nothing and does nothing |
 
 The first two were part of the executable until they became mods; they are the worked
 examples of a code mod that reaches deep into the game. 3D Monsters' knobs

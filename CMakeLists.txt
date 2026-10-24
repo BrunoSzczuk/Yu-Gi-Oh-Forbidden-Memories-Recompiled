@@ -490,14 +490,15 @@ if(BUILD_TESTING)
     # the PE linker reports them before it, so this test is ELF-only.
     if(NOT WIN32 AND NOT MSVC)
         add_executable(memories_cards_identity_test tests/pc/cards_identity_test.c src/pc/platform/paths.c
-                       src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c)
+                       src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c
+                       tests/pc/translated_image_stub.c)
         target_include_directories(memories_cards_identity_test PRIVATE src)
         target_compile_definitions(memories_cards_identity_test PRIVATE MEMORIES_PC)
         target_compile_options(memories_cards_identity_test PRIVATE -ffunction-sections -fdata-sections)
         target_link_options(memories_cards_identity_test PRIVATE -Wl,--gc-sections)
         add_test(NAME pc_cards_identity COMMAND memories_cards_identity_test)
         add_executable(memories_card_notes_test tests/pc/card_notes_test.c src/pc/cards/card_notes.c
-                       src/pc/mods/json.c src/pc/platform/paths.c)
+                       src/pc/mods/json.c src/pc/platform/paths.c tests/pc/translated_image_stub.c)
         target_include_directories(memories_card_notes_test PRIVATE src)
         target_compile_definitions(memories_card_notes_test PRIVATE MEMORIES_PC)
         target_compile_options(memories_card_notes_test PRIVATE -ffunction-sections -fdata-sections)
@@ -537,7 +538,8 @@ if(BUILD_TESTING)
     # A card's "stars" through cards.c's own add_entry, on a stand-in for the
     # disc's tables (notes/modding.md, "No star").
     add_executable(memories_cards_stars_test tests/pc/cards_stars_test.c tests/pc/attribute_icons_stub.c src/pc/cards/stars.c src/pc/cards/attributes.c
-                   src/pc/mods/json.c src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c)
+                   src/pc/mods/json.c src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c
+                   tests/pc/translated_image_stub.c)
     target_include_directories(memories_cards_stars_test PRIVATE src)
     target_compile_definitions(memories_cards_stars_test PRIVATE MEMORIES_PC)
     if(WIN32)
@@ -551,7 +553,7 @@ if(BUILD_TESTING)
     # mod loader and cards.c's Cards_Build: once as the folders sort, once
     # with the second moved first (notes/more-cards.md).
     add_executable(memories_cards_order_test tests/pc/cards_order_test.c tests/pc/attribute_icons_stub.c src/pc/cards/stars.c src/pc/cards/attributes.c ${MOD_TEST_SOURCES}
-                   src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c)
+                   src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c tests/pc/translated_image_stub.c)
     target_include_directories(memories_cards_order_test PRIVATE src)
     target_compile_definitions(memories_cards_order_test PRIVATE MEMORIES_PC)
     target_link_libraries(memories_cards_order_test PRIVATE m Threads::Threads)
@@ -565,7 +567,7 @@ if(BUILD_TESTING)
     # to and from a custom monster type, a name collision, two mods
     # redefining one id, and a name the game has no letters for.
     add_executable(memories_card_types_test tests/pc/card_types_test.c tests/pc/attribute_icons_stub.c src/pc/cards/stars.c src/pc/cards/attributes.c ${MOD_TEST_SOURCES}
-                   src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c)
+                   src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c tests/pc/translated_image_stub.c)
     target_include_directories(memories_card_types_test PRIVATE src)
     target_compile_definitions(memories_card_types_test PRIVATE MEMORIES_PC)
     target_link_libraries(memories_card_types_test PRIVATE m Threads::Threads)

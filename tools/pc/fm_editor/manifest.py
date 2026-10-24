@@ -122,8 +122,11 @@ def build_cards(project: Project) -> list:
             effect = project.retail.cards.get(project.effect_of(cid))
             # The port refuses a copy made another non-monster without a
             # matching effect, but for an equip, which needs none; any card
-            # may become a monster (cards.c).
-            if card.type != 23 and (effect is None or effect.type != card.type):
+            # may become a monster (cards.c). A community image's card list
+            # may hold another card at the effect's id, so there the port
+            # takes the mod's word for the type (cards.c, a modified image).
+            if card.type != 23 and (effect is None or effect.type != card.type) and \
+                    project.retail.retail_image:
                 fields.pop("type", None)
         entry.update(fields)
         if project.passwords.get(cid):
@@ -802,7 +805,7 @@ def _apply_fields(project: Project, card, entry: dict, is_replace: bool, message
         if value >= 0:
             value = _clamp(value, 0, TYPE_LIMIT - 1)
             if (not is_replace and not is_monster_type(value) and value != card.type and value != effect_type and
-                    value != 23):     # cards.c
+                    value != 23 and project.retail.retail_image):     # cards.c
                 messages.append(f"{where}: a copy becomes a non-monster only with a matching retail effect; "
                                 f"\"type\" left out")
             else:

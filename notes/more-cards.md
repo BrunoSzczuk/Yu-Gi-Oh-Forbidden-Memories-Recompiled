@@ -94,6 +94,12 @@ so a mod can rework the existing cards without adding any:
   "type": "Plant", "attribute": "Earth", "attack": 1180, "defense": 1150 }
 ```
 
+A name is looked up in the disc's own name table, so with a community image
+it is the image's card that is named
+([Community images](community-images.md#cards-named-in-a-mod)). The card
+the name gives is the one the mod changes, and a name no card has is refused
+with a note in the log.
+
 It takes the keys above that change what a player reads off the card:
 `name`, `description`, `art`, `thumbnail`, `title`, `field_art`, `attack`, `defense`,
 `type`, `attribute`, `level`, `stars`, `frame` and `password` (without one it shows
@@ -315,6 +321,29 @@ because it is not a monster on the field; an entry that does is left out
 with a note.  `"card_effects"`, `"card_effects_mode"` and `"ai_effect"`
 (below) work only on a Magic or Trap card: on any other card they are refused
 with a note, and a copy made a monster drops the ones its base had.
+
+A copy takes the card the image has at that id, not the retail one: with a
+community image whose card list replaced a card (a mod that put its own card
+where a retail spell was), the copy is that card, and a spell's effects are
+refused on it. The note says which type it is. A copy that carries its own
+`"card_effects"` may name the `"type"` it wants (a Magic or a Trap), since
+what it does is the mod's own work and not a retail effect:
+
+```json
+{ "copy": 320, "type": "Magic",
+  "card_effects": [ { "do": "damage", "amount": 300 } ] }
+```
+
+Without that `"type"` a copy may still become a non-monster when it has a
+retail effect of that type (the effect names a built-in behavior), and an
+equip needs none.
+
+With a community image even that is left out: its card list may hold a
+monster where retail has a spell, so the effect's own card says nothing
+about the type the mod wants, and the image is taken at its word (the same
+the editor does, `tools/pc/fm_editor/manifest.py`). The image's own card
+list still decides what the card does: an effect the image has no group for
+never runs, whatever the mod names (`notes/community-images.md`).
 
 ```json
 { "replace": "Hinotama", "card_effects_mode": "replace",

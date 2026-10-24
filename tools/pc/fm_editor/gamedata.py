@@ -21,6 +21,7 @@ WA_MRG.MRG
 """
 from __future__ import annotations
 
+import hashlib
 import struct
 import sys
 from dataclasses import dataclass, field, replace as dc_replace
@@ -246,6 +247,14 @@ class GameData:
     notes: list = field(default_factory=list)          # oddities found while reading
     campaign_map: object = None                        # campaign_map.MapData, None without the overworld packages
     board: object = None                               # board_art.BoardData: the duel board's textures
+    retail_image: bool = True                          # the executable is the retail one
+
+
+# The retail executable's SHA-256 (config/slus_01411/image_map.json). A
+# community image has its own, and its card list may hold another card at a
+# retail id (a mod that replaced the retail spell there): the rules that
+# compare a card with the retail one must not read it as the retail card.
+RETAIL_EXECUTABLE_SHA256 = "84a54ed74f3d0edd6d81380839f7e4ef5bfb21ecea18be9a062bd6bfa5a45c88"
 
 
 # --- reading the executable ----------------------------------------------
@@ -488,6 +497,7 @@ def read_passwords(wa: bytes) -> dict:
 
 def read_game(slus: bytes, wa: bytes) -> GameData:
     data = GameData(cards=read_cards(slus, wa))
+    data.retail_image = hashlib.sha256(slus).hexdigest() == RETAIL_EXECUTABLE_SHA256
     read_archive(wa, data)
     data.passwords = read_passwords(wa)
     if data.passwords:

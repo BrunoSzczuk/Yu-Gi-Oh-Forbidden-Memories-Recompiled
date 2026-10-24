@@ -1,0 +1,14 @@
+{
+  "id": "kuriboh-card-effects",
+  "name": "Kuriboh card effects",
+  "version": "1.0",
+  "author": "DecompRecomp",
+  "description": "Gives Cyber Angel Vrash, a card the Kuriboh Evolution image adds, the +500 ATK its own text promises, which the image never implements. Off by default: the card is named, so with another disc the mod finds nothing and does nothing.",
+  "min_api": 10,
+  "enabled": false,
+  "cards": [
+    { "replace": "Cyber Angel Vrash",
+      "monster_effects": [
+        { "when": "face_up", "do": "boost", "target": "all", "attribute": "Light", "attack": 500 } ] }
+  ]
+}

@@ -736,6 +736,41 @@ def link_game(
     return status
 
 
+def stage_mods(build: Path) -> None:
+    """The bundled mods beside the game.
+
+    The port finds the mods it offers in the `mods` folder next to the
+    executable (and a player's own in the user directory), so the build
+    leaves them there: their manifests, and their code built for this
+    target. The 32-bit build does the same (build_game32.py's stage_mods).
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import build_mod_arm64
+
+    out_root = build / "mods"
+    out_root.mkdir(parents=True, exist_ok=True)
+    staged = []
+    for manifest in sorted(ROOT.glob("mods/*/mod.json")):
+        source_dir = manifest.parent
+        out_dir = out_root / source_dir.name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for path in sorted(source_dir.rglob("*")):
+            if path.is_dir() or path.suffix in (".c", ".h"):
+                continue
+            target = out_dir / path.relative_to(source_dir)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists() or target.read_bytes() != path.read_bytes():
+                shutil.copy2(path, target)
+        try:
+            build_mod_arm64.build(source_dir, out_dir, game=build)
+        except SystemExit as error:
+            print(f"{source_dir.name}: {error}", file=sys.stderr)
+        staged.append(source_dir.name)
+    print(f"{out_root}: " + ", ".join(staged), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", choices=("macos", "android-arm64-translated"), default="macos")
@@ -970,6 +1005,8 @@ def main():
         (build / "build-identity.json").write_text(
             json.dumps(identity, indent=2) + "\n"
         )
+        if args.target == "macos":
+            stage_mods(build)
     return status
 
 

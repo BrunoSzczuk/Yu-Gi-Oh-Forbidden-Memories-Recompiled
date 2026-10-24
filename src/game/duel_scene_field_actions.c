@@ -192,6 +192,20 @@ void DuelScene_UpdateFieldActions(void)
             if (!(flags & 0x8000)) {
                 a = D_800EAE91[0];
                 D_8009B20C[0] = flags | 0x8000;
+                #ifdef MEMORIES_PC
+                /* A few modified discs end this decision with EndHand and
+                 * leave no field-card selection.  Retail never reaches the
+                 * cursor code with zero, but doing so here makes
+                 * (a - 1) become column 255 and traps the duel forever. */
+                if (a == 0 || a > 0x3C) {
+                    D_8009B16C &= 0xEFFF;
+                    DisplayObject_ReleaseIfPresent(D_8009B1F8);
+                    D_8009B1F8 = 0;
+                    D_8009B174 = 0xA;
+                    SD_SEPlayFull(0x30);
+                    return;
+                }
+                #endif
                 D_8009B160 = -1;
                 D_8009B1D7 = 2;
                 D_8009B1D6 = (a - 1) % 5;

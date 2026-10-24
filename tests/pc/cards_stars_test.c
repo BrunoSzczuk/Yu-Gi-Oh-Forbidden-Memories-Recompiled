@@ -16,7 +16,7 @@ static unsigned test_stats[722];
 static short test_sort_keys[722];
 static unsigned char test_level_attr[723];
 static unsigned short test_name_offsets[723];
-static unsigned char test_text_bank[16] = {0xFF};
+static unsigned char test_text_bank[64] = {0xFF};
 static unsigned test_glyphs[256];
 #define RETAIL_STATS ((uintptr_t)test_stats)
 #define RETAIL_SORT_KEYS ((uintptr_t)test_sort_keys)
@@ -222,6 +222,39 @@ static void expect(int id, int first, int second)
         fprintf(stderr, "card %d: stars %d, %d; expected %d, %d\n", id, a, b, first, second);
         assert(0);
     }
+}
+
+/* A card a mod names ("replace": "Cyber Angel Vrash") is found by its name.
+   A name's text opens with the command the card view draws the name in
+   (F8 0A NN sets its colour), which is not part of the name: stepped over,
+   or the name comes out with a prefix and no card is ever found. */
+static void card_names(void)
+{
+    static const char first[] = "Kuriboh", second[] = "Raigeki";
+    char decoded[64];
+    int id, i;
+    /* The glyphs the two names are written with. */
+    for (i = 0; first[i]; i++) test_glyphs[1 + i] = sjis_of(first[i]);
+    for (i = 0; second[i]; i++) test_glyphs[8 + i] = sjis_of(second[i]);
+    /* The names' texts, each with its colour command in front. */
+    test_text_bank[0] = 0xF8; test_text_bank[1] = 0x0A; test_text_bank[2] = 0x02;
+    for (i = 0; first[i]; i++) test_text_bank[3 + i] = (unsigned char)(1 + i);
+    test_text_bank[3 + i] = 0xFF;
+    test_text_bank[16] = 0xF8; test_text_bank[17] = 0x0A; test_text_bank[18] = 0x06;
+    for (i = 0; second[i]; i++) test_text_bank[19 + i] = (unsigned char)(8 + i);
+    test_text_bank[19 + i] = 0xFF;
+    test_name_offsets[1] = 0;
+    test_name_offsets[2] = 16;
+    for (id = 3; id <= CARD_COUNT; id++) test_name_offsets[id] = 32;   /* no name */
+    retail_name(1, decoded, sizeof(decoded));
+    assert(!strcmp(decoded, "Kuriboh"));
+    retail_name(2, decoded, sizeof(decoded));
+    assert(!strcmp(decoded, "Raigeki"));
+    assert(retail_by_name("Kuriboh") == 1);
+    assert(retail_by_name("kuriboh") == 1);       /* the case does not matter */
+    assert(retail_by_name("Kuriboh ") == 1);       /* the spacing does not either */
+    assert(retail_by_name("Raigeki") == 2);
+    assert(retail_by_name("No Such Card") == 0);
 }
 
 static void magic_conversions(void)
@@ -664,6 +697,8 @@ int main(void)
     for (id = 300; id <= 302; id++) test_stats[id - 1] = STATS(CARD_TYPE_MAGIC, 0, 0);
     Stars_Clear();
     assert(!Stars_NoStarUsed());
+
+    card_names();
 
     Cards_Build();
     assert(Stars_NoStarUsed());

@@ -1529,3 +1529,15 @@ class MonsterEffectsTest(unittest.TestCase):
         card.type = g.TYPE_TRAP
         self.assertTrue(any("matching retail effect" in i.message for i in validate.validate_card(p, cid)))
         self.assertNotIn("type", next(e for e in manifest.build(p)["cards"] if e.get("id") == "magic-monster"))
+
+    def test_a_community_image_keeps_the_type_the_mod_gives(self):
+        # A community image's card list may hold another card at the effect's
+        # id, so there the port takes the mod's word for the type (cards.c, a
+        # modified image) and the editor writes that type out.
+        p = self.project
+        p.retail.retail_image = False
+        magic = next(cid for cid, card in sorted(p.cards.items()) if card.type == g.TYPE_MAGIC)
+        cid = p.add_card(magic, "magic-monster")
+        p.cards[cid].type = g.TYPE_TRAP
+        entry = next(e for e in manifest.build(p)["cards"] if e.get("id") == "magic-monster")
+        self.assertEqual(entry["type"], "Trap")

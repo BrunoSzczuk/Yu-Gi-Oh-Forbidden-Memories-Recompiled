@@ -27,6 +27,7 @@
 #include "pc/mods/mods.h"
 #include "pc/mods/json.h"
 #include "pc/platform/paths.h"
+#include "pc/guest/translated_image.h"
 #include "pc/platform/settings.h"
 #include "pc/debug/log.h"
 #include "pc/guest/low_memory.h"
@@ -302,7 +303,10 @@ static int glyph_of(int c)
     return -1;
 }
 
-/* A retail name in ASCII, for matching "copy": "Kuriboh" and for the log. */
+/* A retail name in ASCII, for matching "copy": "Kuriboh" and for the log.
+   A name's text opens with the same commands a description has (F8 0A NN
+   sets the colour the name is drawn in), which are not part of the name:
+   they are stepped over, as the card view's own text does. */
 static void retail_name(int id, char *out, size_t size)
 {
     const unsigned short *offsets = (const unsigned short *)(uintptr_t)RETAIL_NAME_OFFSETS;
@@ -312,6 +316,11 @@ static void retail_name(int id, char *out, size_t size)
     while (*text != 0xFF && n + 1 < size) {
         int code = *text++;
         int c = '?';
+        if (code == 0xF8) {
+            /* F8 0A NN and F8 0B NN carry a byte, the other commands do not. */
+            text += (text[0] == 0x0A || text[0] == 0x0B) ? 2 : 1;
+            continue;
+        }
         if (code >= 0xF0) code = ((code - 0xF0) << 8) | *text++;
         if (code == 0) {
             c = ' ';
@@ -1535,14 +1544,29 @@ static void add_entry(const char *mod, const char *directory, int index, const J
          * that type. The effect names a built-in behavior, even if the
          * source card was itself replaced. An equip needs none: what it
          * equips and adds are the mod's "equips" rules (tables.h). Any
-         * card may become a monster, as a replaced one may. */
+         * card may become a monster, as a replaced one may.
+         *
+         * A copy that carries its own "card_effects" needs no retail
+         * effect: what it does is the mod's own work. That matters with a
+         * community image, whose card list may hold another card at the
+         * copied id (a mod that replaced the retail spell there): the copy
+         * takes that card's type, and a spell's effects would be refused
+         * on it. The mod may name the type it wants.
+         *
+         * A community image also says nothing about the type of the card
+         * an effect belongs to (its own list may hold a monster where
+         * retail has a spell), so there the check that the effect and the
+         * type agree is left out: the mod names both. */
         int monster = Cards_IsMonsterType((int)((stats >> 26) & 0x1F));
         int effect = Cards_Reference(Json_Member(entry, "effect"));
+        const MemoriesExecutionProfile *profile = Memories_TranslatedExecutionProfile();
+        int retail_image = !profile || profile->id == MEMORIES_PROFILE_VANILLA;
         if (effect <= 0 && Json_Number(Json_Member(entry, "effect"), 0) == 0)
             effect = Cards_EffectId(base);
         value = clamp(value, 0, CARD_TYPE_LIMIT - 1);
         if (!replace && !Cards_IsMonsterType(value) && value != (int)((stats >> 26) & 0x1F) &&
-            !(value >= CARD_TYPE_MAGIC && Cards_RetailType(effect) == value) && value != CARD_TYPE_EQUIP) {
+            !(value >= CARD_TYPE_MAGIC && Cards_RetailType(effect) == value) && value != CARD_TYPE_EQUIP &&
+            card_effect_count <= 0 && retail_image) {
             Mods_Note(mod, "cards[%d]: %s; \"type\" left out", index,
                       monster ? "a copy needs a matching retail effect to become a non-monster" :
                                 "a non-monster copy needs a matching retail effect to change type");
@@ -1790,9 +1814,12 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         spell_or_trap = (int)((stats >> 26) & 0x1F) == CARD_TYPE_MAGIC ||
                         (int)((stats >> 26) & 0x1F) == CARD_TYPE_TRAP;
         if (!spell_or_trap) {
-            if (card_effect_count >= 0 || card_effect_mode_given || ai_effect_given)
+            if (card_effect_count >= 0 || card_effect_mode_given || ai_effect_given) {
+                int kind = (int)((stats >> 26) & 0x1F);
                 Mods_Note(mod, "cards[%d]: \"card_effects\", \"card_effects_mode\" and \"ai_effect\" "
-                          "only work for a Magic or Trap card", index);
+                          "only work for a Magic or Trap card (its type is %s)", index,
+                          kind >= 0 && kind <= CARD_TYPE_EQUIP ? retail_type_names[kind] : "a custom type");
+            }
             free(own_card_effects);
             own_card_effects = NULL;
             card_effect_count = 0;

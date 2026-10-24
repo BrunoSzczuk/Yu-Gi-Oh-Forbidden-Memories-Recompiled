@@ -201,7 +201,12 @@ class Fixture:
         self.wa = make_wa(self.fusions, self.equips, self.rituals, self.pools)
 
     def game(self) -> g.GameData:
-        return g.read_game(self.slus, self.wa)
+        data = g.read_game(self.slus, self.wa)
+        # The fixture stands in for the retail disc, so the rules that compare
+        # a card with the retail one hold: a community image has an executable
+        # of its own, and its card list may hold another card at a retail id.
+        data.retail_image = True
+        return data
 
 
 def make_iso(files: dict, raw: bool = True) -> bytes:

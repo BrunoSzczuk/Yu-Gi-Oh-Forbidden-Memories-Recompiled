@@ -164,6 +164,106 @@ control channel (`tools/pc/yfm_control.py`):
   that, `python3 tools/pc/build_mod.py mods/<id> --target macos` builds one,
   or the game says the dylib is missing.
 
+## The image's own cards
+
+The port reads the card table, the names, the sort keys, the level and
+attribute table and the effect groups from the image, at the retail addresses
+(`RETAIL_STATS` and the rest in `src/pc/cards/cards.c`), so what the image
+holds is what the game shows and plays.  The Kuriboh image keeps the retail
+722 ids but holds its own cards at many of them:
+
+| Id | Retail | The image |
+|---|---|---|
+| 320 | Stop Defense | nSilver Wing (an Equip) |
+| 337 | Raigeki | tCristal Raigeki (a Magic) |
+| 350 | Dark-piercing Light | nAncient Forest (an Equip) |
+| 655 | Cursebreaker | tCristal de Distorsion (an Equip) |
+| 665-700 | the ritual spells | the mod's own monsters |
+| 681-690 | the trap effects | the mod's own cards, with no effect |
+
+The image's effect group table agrees with its own list (the groups of the
+cards it replaced are empty), so the image is self-consistent: a card it
+replaced has no effect in the mod's own game either.  A scenario that plays
+one of those cards cannot run on this image:
+
+```sh
+MEMORIES_DISC="$HOME/Downloads/Yu-Gi-Oh! Kuriboh Evolution (Drop x15).bin" \
+    python3 tools/pc/test_duel_effects.py --executable tmp/pc/macos/memories-arm64 \
+    stop-defense dp-light cursebreaker
+```
+
+Those three report `no effect ran`: the card at that id is not a spell any
+more.  The cards the image kept work (`raigeki-t2`, `dark-hole`, `ritual`).
+
+A card mod of the port's own runs with the image, and its card effects run:
+`tests/pc/replacement_trap_combat_runtime.py` passes its five paths (a
+replacement attack trap with a heal, a trap with a destroy, and the combat
+triggers) on this image, and a mod's `card_effects` damage, heal, magic,
+boost, destroy and `card_effects_mode` were measured in a duel as well.  A
+copy that names a card the image replaced takes that card's type, so its
+`card_effects` are refused until the mod names the `"type"` it wants
+(`notes/more-cards.md`).  With a community image even the type a copy gets
+is the mod's word: the image's list says nothing about the retail card at
+that id.
+
+What the image has no group for never runs, whatever a mod names: a mod's
+ritual (the image has no ritual effects) and a trap that carries a retail
+trap effect (the image has none for 681-690).  The log says so:
+
+```
+memories-pc: mod copytest: cards[0]: "card_effects", "card_effects_mode" and
+    "ai_effect" only work for a Magic or Trap card (its type is Equip)
+```
+
+### Cards the image describes but never gives an effect
+
+Some of the cards the image adds say what they do in their own text, and the
+image's code never does it.  Card 174 is the clearest case: the image's
+`Cyber Angel Vrash` (a Fairy, LIGHT, 3000/2000, ten stars), whose text
+promises "Increases 500 points for monster with LIGHT attribute on the
+field".  Nothing in the image carries that effect out: no function of the
+retail layout holds the 500 the text asks for, the field's stat calculation
+(`Duel_CalcCardStats`, the retail one at 0x800170C8) is untouched, and the
+image adds no code of its own.  Measured on the image, with no mod at all,
+the card shows its own 3000/2000 on the field and no LIGHT monster beside it
+is stronger.
+
+The port does not invent the effect: the image is what the game plays.  The
+port's mod system can give the card the effect its text promises, and
+`mods/kuriboh-card-effects` (off by default) does:
+
+```json
+{ "replace": "Cyber Angel Vrash",
+  "monster_effects": [
+    { "when": "face_up", "do": "boost", "target": "all", "attribute": "Light", "attack": 500 } ] }
+```
+
+The card then shows 3500/2000 on the field, and every LIGHT monster on the
+field with it.  The mod names the card, so with another disc it finds no card
+and does nothing.
+
+The other cards the image adds read the same way: `Hamon, Lord of Striking
+Thunder` (665), `Uria` (666), `Raviel` (667), `Hades` (670), `Ozone
+Elemental` (680) and `Obelisk the Tormentor` (698) promise boosts, and the
+image's equips (`Silver Wing` 320, `Ancient Forest` 350, `Cristal De
+Distorsion` 655, `Light Stone` 668, `A Legendary Ocean` 687) promise their
++700.  None of them has one in the image.  A mod can give a card the effect
+its text names, as far as the port's own effect vocabulary reaches
+(`notes/more-cards.md`); what the text asks that the vocabulary has no word
+for (Obelisk's second attack a turn, Ozone's count in the deck) no mod can
+give.
+
+### Cards named in a mod
+
+A mod may name a card instead of numbering it (`"replace": "Cyber Angel
+Vrash"`), and the port looks the name up in the disc's own name table -- the
+image's, when the image is the disc.  A name's text opens with the command
+the card view draws the name in (`F8 0A NN` sets its colour), which is not
+part of the name; the port steps over it (`retail_name` in
+`src/pc/cards/cards.c`), as the card view's own text does.  Without that step
+no name resolved at all, and every card a mod named was refused with
+`"replace" must name a card of the disc`.
+
 ## What still does not work
 
 - **A changed function that keeps the retail function's shape is not
