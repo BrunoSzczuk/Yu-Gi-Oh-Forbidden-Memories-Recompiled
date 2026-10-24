@@ -129,6 +129,13 @@ deleted at any time, and so can the
 folders from before the key (`<mod>/`, `e1e2eded/`) and
 `tmp/pc/mod-objects`, which nothing uses any more.
 
+The translated build (macOS ARM64) stages the bundled mods the same way
+(`stage_mods` in `tools/pc/build_arm64.py`): each `mods/<id>/` beside the
+game, in `<build>/mods/<id>/`, its manifest and its other files copied and
+its code built for the target (`tools/pc/build_mod_arm64.py`). The port
+finds the mods it offers in the `mods` folder next to the executable, and a
+player's own in the user directory, so a build without them offers none.
+
 ## 32-bit game executable (bring-up)
 
 The user chose a 32-bit (ILP32) host build as the bring-up memory model on

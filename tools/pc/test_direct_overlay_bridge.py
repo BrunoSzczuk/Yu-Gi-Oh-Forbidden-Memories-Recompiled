@@ -44,7 +44,11 @@ def shared_bank(sanitize):
         flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
     run_fixture(out, units,
                 [bridge, 'tests/pc/direct_overlay_bridge_test.c', 'src/pc/memory.c',
-                 'src/pc/guest/translated_runtime.c', 'src/pc/guest/state_io.c'],
+                 'src/pc/guest/translated_runtime.c', 'src/pc/guest/guest_io.c',
+                 'src/pc/guest/state_io.c', 'src/pc/guest/execution_profile.c',
+                 'src/pc/guest/translated_image.c', 'src/pc/guest/image_loader.c',
+                 'src/pc/guest/code_patches.c',
+                 'src/pc/guest/sha256.c', 'tests/pc/code_patches_stub.c'],
                 [*flags, '-O2'], ['-Wl,-dead_strip'])
 
 

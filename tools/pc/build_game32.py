@@ -44,6 +44,8 @@ sections cannot be placed at chosen addresses (as on Windows). The APK is packag
 package_android.py) with the SDK's build tools; notes/pc-build.md, "Android"."""
 import argparse, concurrent.futures, csv, filecmp, glob, hashlib, json, os, re, shutil, struct, subprocess, sys
 import build_process
+import code_hashes
+import code_regions
 from build_config import BACKENDS, GATED_MODULES, MODULE_CONFIG, MODULES, TARGETS, game_sources, native_sources
 import ptr32_stores
 
@@ -1433,6 +1435,9 @@ def main():
             handle.writelines(f"{name} = {target};\n" for name, target in aliases.items())
     with open(f"{options.build}/stubs.c", "w") as handle:
         handle.write('#include "pc/guest/image.h"\n')
+        handle.write('#include "pc/guest/code_patches.h"\n')
+        handle.write(code_hashes.emit(ROOT))
+        handle.write(code_regions.emit(rows))
         handle.write(f"const unsigned Memories_GameFingerprint = 0x{digest.hexdigest()[:8]}u;\n")
         handle.writelines(f'void {name}(void) {{ Memories_Unimplemented("{name}"); }}\n'
                           for name in sorted(stubs))

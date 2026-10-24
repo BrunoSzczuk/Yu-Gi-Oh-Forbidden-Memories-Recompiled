@@ -75,6 +75,7 @@ subprocess.run(
         str(harness),
         "src/pc/mods/hooks.c",
         "src/pc/guest/translated_runtime.c",
+        "src/pc/guest/guest_io.c",
         "src/pc/guest/state_io.c",
         "src/pc/memory.c",
         "-Wl,-dead_strip",

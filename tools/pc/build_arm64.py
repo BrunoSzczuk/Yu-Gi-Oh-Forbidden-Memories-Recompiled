@@ -344,7 +344,8 @@ def prepare_guest_units(jobs, groups, natives, ordinary, path_for, address_table
     )
 
 
-def compile_guest_units(jobs, ordinary, raw_text, pin_maps, path_for, cc, sdk, args):
+def compile_guest_units(jobs, ordinary, raw_text, pin_maps, path_for, cc, sdk, args,
+                        code_addresses=None):
     """Lower guest accesses before O2 code generation; register in source order."""
     # Token assignment follows source order, independent of worker completion.
     registrations = {
@@ -353,6 +354,22 @@ def compile_guest_units(jobs, ordinary, raw_text, pin_maps, path_for, cc, sdk, a
         for source, group in jobs
         if source not in ordinary
     }
+
+    def unit_addresses(source, group):
+        """The retail addresses of the functions this unit defines.
+
+        A community image may have replaced the code at one of them; the
+        image's own code then runs in the interpreter. Only the resident
+        game code has retail addresses: an overlay's code is interpreted
+        already, and the port's own code is not the game's."""
+        if group != "resident" or not code_addresses:
+            return {}
+        definitions = set(inspect(raw_text[source])["definitions"])
+        return {
+            name: address
+            for name, address in code_addresses.items()
+            if name in definitions
+        }
 
     def adapt(job):
         source, group = job
@@ -368,6 +385,10 @@ def compile_guest_units(jobs, ordinary, raw_text, pin_maps, path_for, cc, sdk, a
                 routine,
                 game_unit=group != "native",
                 hooks=group != "native" or "/overrides/" in source,
+                **(
+                    {"code_addresses": unit_addresses(source, group)}
+                    if code_addresses else {}
+                ),
             )
         except TranslationError as error:
             path_for("logs", source, ".transform.log").write_text(str(error))
@@ -396,7 +417,6 @@ def compile_guest_units(jobs, ordinary, raw_text, pin_maps, path_for, cc, sdk, a
         adapted = list(pool.map(adapt, jobs))
     failures = [s for s, status in adapted if status]
     return registrations, failures
-
 
 def generate_function_tables(
     raw_text, linked_defs, host_renames, rows, pin_maps, registrations, revision
@@ -896,7 +916,12 @@ def main():
         native_defs,
     ) = prepare_guest_units(jobs, groups, natives, ordinary, path_for, address_tables)
     registrations, failures = compile_guest_units(
-        jobs, ordinary, raw_text, pin_maps, path_for, cc, sdk, args
+        jobs, ordinary, raw_text, pin_maps, path_for, cc, sdk, args,
+        code_addresses={
+            row["name"]: int(row["address"], 16)
+            for row in rows
+            if not row.get("bank")
+        },
     )
     (build / "summary.json").write_text(
         json.dumps(

@@ -58,6 +58,10 @@ def run_translated_fixture(units, harness, out, *, sanitize=False, extra_sources
     host_sources = [
         ROOT / "src/pc/memory.c",
         ROOT / "src/pc/guest/translated_runtime.c",
+        ROOT / "src/pc/guest/guest_io.c",
+        # The guest I/O device keeps its registers in a save-state chunk; the
+        # state machinery itself is not what these fixtures are about.
+        ROOT / "tests/pc/state_chunk_stub.c",
     ]
     return run_fixture(
         out,

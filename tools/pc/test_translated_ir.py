@@ -130,6 +130,55 @@ define i32 @read_card_attack() {{
     assert f"@{stats} = external global [1024 x i32]" in translated
 
 
+def run_patched_call_case(args):
+    """The native call to a function the image changed runs the image's code.
+
+    The wrapper around the function asks the interpreter for the image's own
+    code and falls back to the retail code when the interpreter cannot run it.
+    Memories_MipsTry answers 0 when it ran and a non-zero status when it
+    could not, and the two must not be confused: the interpreter's answer
+    belongs to the call that succeeded. """
+    out = ROOT / "tmp/translated-game-ir/patched-call"
+    out.mkdir(parents=True, exist_ok=True)
+    compiler = str(toolchain() / "bin/clang")
+    flags = [
+        "-std=c11",
+        "-DMEMORIES_PC",
+        "-DMEMORIES_TRANSLATED",
+        "-fms-extensions",
+        "-Wno-pointer-to-int-cast",
+        "-Wno-gnu-folding-constant",
+        "-Isrc",
+        "-isysroot",
+        str(sdk_path()),
+    ]
+    raw = out / "probe.raw.ll"
+    subprocess.run(
+        [compiler, *flags, "-O0", "-S", "-emit-llvm",
+         str(ROOT / "tests/pc/translated_patched_call_probe.c"), "-o", str(raw)],
+        cwd=ROOT,
+        check=True,
+        timeout=60,
+    )
+    unit = out / "probe.ll"
+    unit.write_text(
+        translate(
+            normalize(raw.read_text()),
+            hooks=True,
+            code_addresses={"probe": 0x8007058C},
+        )
+    )
+    if args.sanitize:
+        flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
+    run_fixture(
+        out,
+        [unit, "tests/pc/translated_patched_call_test.c"],
+        [],
+        [*flags, "-O2" if args.optimize else "-O0"],
+        ["-Wl,-dead_strip"],
+    )
+
+
 def run_case(case, args):
     out = ROOT / "tmp/translated-game-ir" / case
     out.mkdir(parents=True, exist_ok=True)
@@ -184,6 +233,7 @@ def run_case(case, args):
         [
             "src/pc/memory.c",
             "src/pc/guest/translated_runtime.c",
+            "src/pc/guest/guest_io.c",
             "src/pc/guest/translated_libc.c",
             "src/pc/guest/state_io.c",
         ],
@@ -202,6 +252,7 @@ def main():
     if args.case in ("all", "ir"):
         check_pc_defined_storage_pins()
         check_mod_pc_storage_imports()
+        run_patched_call_case(args)
     for case in ("ir", "game-unit") if args.case == "all" else (args.case,):
         run_case(case, args)
 

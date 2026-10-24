@@ -1,4 +1,5 @@
 #include "../../types.h"
+#include "guest_io.h"
 #include "translated_runtime.h"
 #include "pc/memory_span.h"
 #include "pc/compat/ot_chain.h"
@@ -303,6 +304,8 @@ void *GuestRuntime_ResolveData(void *pointer, size_t length)
     /* Full-width host pointers already address native storage. */
     if (address > UINT32_MAX) return pointer;
     if (!GuestRuntime_ActiveMemory) invalid("memory context is unbound", address, length);
+    if (Memories_GuestIoContains((u32)address, length))
+        return Memories_GuestIoResolve((u32)address, length);
     host = Memories_ResolveSpan(GuestRuntime_ActiveMemory, (u32)address, length, 1);
     if (host) return host;
     if (address < EXTERNAL_BASE || address >= EXTERNAL_END)
@@ -398,6 +401,10 @@ u32 GuestRuntime_EncodePointer(void *pointer)
      * RAM and scratchpad are also adjacent in MemoriesMemory. */
     if (host >= ram && host - ram < MEMORIES_RAM_SIZE) return MEMORIES_GUEST_RAM + (u32)(host - ram);
     if (host >= scratch && host - scratch < MEMORIES_SCRATCHPAD_SIZE) return MEMORIES_GUEST_SCRATCHPAD_RETAIL + (u32)(host - scratch);
+    {
+        u32 io_address;
+        if (Memories_GuestIoEncodePointer(pointer, &io_address)) return io_address;
+    }
     /* Model transforms and packet sorting repeatedly encode native pointers.
      * Searching every function and global here makes that cost grow with the
      * whole game, even though the pointer belongs to one small model arena. */

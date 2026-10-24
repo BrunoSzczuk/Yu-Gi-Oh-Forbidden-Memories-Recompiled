@@ -116,6 +116,13 @@ int main(void)
     code[n++] = ADDIU(SP, SP, 104);
     assert(n <= (int)(sizeof(code) / sizeof(code[0])));
 
+    Memories_MipsSetResidentRange(0x80010000u, 0x100u);
+    assert(Memories_MipsInResident(0x80010000u));
+    assert(Memories_MipsInResident(0x800100ffu));
+    assert(!Memories_MipsInResident(0x80010100u));
+    Memories_MipsSetResidentRange(0, 0);
+    assert(!Memories_MipsInResident(0x80010000u));
+
     assert(Memories_MipsTry((uint32_t)(uintptr_t)code, NULL, 0, &result) == 0);
     check("interpreted", 0x80);
 

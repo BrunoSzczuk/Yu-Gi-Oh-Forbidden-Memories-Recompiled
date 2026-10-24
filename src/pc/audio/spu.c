@@ -4,6 +4,7 @@
 #include "game/sound_voice_constants.h"
 #include <string.h>
 #include "pc/guest/state.h"
+#include "pc/guest/guest_io.h"
 #include "pc/debug/log.h"
 #include <time.h>
 
@@ -48,6 +49,8 @@ static volatile int output_volume = 100;
 static volatile int output_muted;
 static volatile int interpolation; /* SpuInterpolation */
 static volatile int bus_volume[SPU_BUS_COUNT] = {100, 100, 100};
+static int16_t guest_volume_left[SPU_VOICES], guest_volume_right[SPU_VOICES];
+static uint16_t guest_adsr1[SPU_VOICES], guest_adsr2[SPU_VOICES];
 
 #define CD_RING 65536u /* frames; power of two */
 static int16_t cd_ring[CD_RING * 2];
@@ -58,11 +61,59 @@ _Static_assert(CD_RING == 0x10000u, "cd_tail keeps the position in its low 16 bi
 static uint32_t cd_phase;
 static int16_t cd_last[2], cd_next[2];
 
+static void guest_spu_write16(uint32_t offset, uint16_t value, void *context)
+{
+    unsigned voice;
+    unsigned field;
+    (void)context;
+    if (offset < SPU_VOICES * 0x10u) {
+        voice = offset / 0x10u;
+        field = offset & 0x0fu;
+        switch (field) {
+        case 0x00:
+            guest_volume_left[voice] = (int16_t)value;
+            Spu_SetVolume(voice, guest_volume_left[voice], guest_volume_right[voice]);
+            break;
+        case 0x02:
+            guest_volume_right[voice] = (int16_t)value;
+            Spu_SetVolume(voice, guest_volume_left[voice], guest_volume_right[voice]);
+            break;
+        case 0x04: Spu_SetPitch(voice, value); break;
+        case 0x06: Spu_SetStart(voice, (uint32_t)value << 3); break;
+        case 0x08:
+            guest_adsr1[voice] = value;
+            Spu_SetAdsr(voice, guest_adsr1[voice], guest_adsr2[voice]);
+            break;
+        case 0x0a:
+            guest_adsr2[voice] = value;
+            Spu_SetAdsr(voice, guest_adsr1[voice], guest_adsr2[voice]);
+            break;
+        case 0x0e: Spu_SetLoop(voice, (uint32_t)value << 3); break;
+        default: break;
+        }
+        return;
+    }
+    switch (offset) {
+    case 0x180: Spu_KeyOn(value); break;
+    case 0x182: Spu_KeyOn((uint32_t)value << 16); break;
+    case 0x188: Spu_KeyOff(value); break;
+    case 0x18a: Spu_KeyOff((uint32_t)value << 16); break;
+    case 0x1a0: master_left = (int16_t)value; Spu_SetMaster(master_left, master_right); break;
+    case 0x1a2: master_right = (int16_t)value; Spu_SetMaster(master_left, master_right); break;
+    default: break;
+    }
+}
+
 void Spu_Reset(void)
 {
     memset(voices, 0, sizeof(voices));
+    memset(guest_volume_left, 0, sizeof(guest_volume_left));
+    memset(guest_volume_right, 0, sizeof(guest_volume_right));
+    memset(guest_adsr1, 0, sizeof(guest_adsr1));
+    memset(guest_adsr2, 0, sizeof(guest_adsr2));
     pending_on = pending_off = pending_late_off = keyed_mask = 0;
     Spu_CdFlush();
+    Memories_GuestIoRegisterDevice(0xC00u, 0x200u, NULL, guest_spu_write16, NULL);
 }
 
 /* The mixer applies a period's key-offs before its key-ons, which is the

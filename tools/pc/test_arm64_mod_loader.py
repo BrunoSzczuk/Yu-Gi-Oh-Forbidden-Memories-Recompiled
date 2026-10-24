@@ -118,6 +118,7 @@ def main():
             "tests/pc/mod_loader_test.c",
             "src/pc/mods/object_loader.c",
             "src/pc/guest/translated_runtime.c",
+            "src/pc/guest/guest_io.c",
             "src/pc/guest/state_io.c",
             "src/pc/memory.c",
             *["-Wl,-exported_symbol,_" + name for name in exports],

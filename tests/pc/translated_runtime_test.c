@@ -1,4 +1,5 @@
 #include "types.h"
+#include "pc/guest/guest_io.h"
 #include "pc/guest/translated_runtime.h"
 #include <assert.h>
 #include <stdio.h>
@@ -63,6 +64,13 @@ int main(void)
     assert(GuestRuntime_EncodePointer(memory->scratchpad) == 0x1f800000u);
     assert(GuestRuntime_ResolveData((void *)(uintptr_t)GuestRuntime_EncodePointer(memory->scratchpad), 1) == memory->scratchpad);
     assert(GuestRuntime_EncodePointer(NULL) == 0);
+    {
+        uint16_t *spu = GuestRuntime_ResolveData((void *)(uintptr_t)0x1F801D4Cu, 2);
+        assert(spu == (uint16_t *)Memories_GuestIoResolve(0x1F801D4Cu, 2));
+        *spu = 0x1234u;
+        assert(Memories_GuestIoRead16(0x9F801D4Cu) == 0x1234u);
+        assert(GuestRuntime_EncodePointer(spu) == 0x1F801D4Cu);
+    }
     /* External tokens must never collide with the console aliases, even
      * when a registered span crosses into them from the preceding byte. */
     assert(GuestRuntime_RegisterData(external, 8, MEMORIES_GUEST_RAM_UNCACHED) == -1);

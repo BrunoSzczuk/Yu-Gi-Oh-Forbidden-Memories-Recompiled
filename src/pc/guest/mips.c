@@ -1,9 +1,10 @@
-/* A small MIPS I interpreter for the overlays that have no C source: the WA
- * duel-effect bank at 0x80146000 and the per-monster MODEL control modules
+/* A small MIPS I interpreter for code ranges that have no native C entry: the
+ * WA duel-effect bank at 0x80146000, the per-monster MODEL control modules
  * swapped into 0x8013A000/0x8013B000 (slot A) and 0x8017A000/0x8017B000
- * (slot B). The retail bytes are loaded by the game's own loader at their
- * original addresses; the interpreter runs them there and bridges every
- * call that leaves the overlay to the native function of that address.
+ * (slot B), and resident code callbacks supplied by compatible code mods.
+ * The bytes are loaded by the game's own loader at their original addresses;
+ * the interpreter runs them there and bridges every call that leaves the
+ * interpreted range to the native function of that address.
  *
  * Scope: integer MIPS I plus COP2 through the software GTE. `break` is
  * GCC's divide-by-zero trap, which only follows a zero divisor the `div`
@@ -24,6 +25,7 @@
 #include "translated_runtime.h"
 #endif
 #include "pc/compat/gte.h"
+#include "guest_io.h"
 #include "pc/rng.h"
 #include "pc/debug/log.h"
 #include "pc/debug/crash.h"
@@ -32,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pc/compat/mman.h"
+#include "code_patches.h"
 
 #define STACK_BASE 0x9FF00000u
 #define STACK_SIZE 0x40000u
@@ -50,7 +53,22 @@ extern void Model_QueueTintRequestForPartList(int32_t slot, int32_t part, uint32
 
 static uint32_t stack_top;   /* 0 until the stack is mapped */
 static uint32_t current_sp;  /* the innermost interpreted frame, or 0 */
+static uint32_t resident_base;
+static uint32_t resident_end;
+static int resident_native_calls = 1;
 uint32_t Memories_MipsThunkTarget;
+
+/* MEMORIES_TRACE_GUEST=1 logs what the interpreter hands back to the native
+ * code: the code a community image patched runs this way. */
+static int trace_interpreter(void)
+{
+    static int tracing = -1;
+    const char *value;
+    if (tracing >= 0) return tracing;
+    value = getenv("MEMORIES_TRACE_GUEST");
+    tracing = value && *value && strcmp(value, "0") != 0;
+    return tracing;
+}
 #ifdef MEMORIES_TRANSLATED
 #include "state.h"
 void Memories_MipsState(MemoriesState *state)
@@ -58,27 +76,86 @@ void Memories_MipsState(MemoriesState *state)
     MemoriesStateField fields[] = {{&stack_top, sizeof(stack_top)}, {&current_sp, sizeof(current_sp)},
                                   {&Memories_MipsThunkTarget, sizeof(Memories_MipsThunkTarget)}};
     Memories_StateChunk(state, "arm64-mips", fields, sizeof(fields) / sizeof(fields[0]));
+    Memories_GuestIoState(state);
 }
 #endif
 
 /* Retail code reaches the scratchpad at 0x1F800000, which the host may not
- * let the port map; the port's view of it is 0x9F800000 (image.h). Every
- * guest address the interpreter dereferences, or hands to native code,
- * goes through AT(): where something else holds 0x1F800000 (an Android
- * app's Java heap) an access there would not fault but reach the holder. */
+ * let the port map; the port's view of it is 0x9F800000 (image.h). In the
+ * translated backend the guest RAM is a heap object rather than a fixed host
+ * mapping, so resolve it through the runtime. The private interpreter stack
+ * remains a fixed mapping and is handled locally. */
+#ifdef MEMORIES_TRANSLATED
+static void *translated_at(uint32_t address, size_t length)
+{
+    if (address >= STACK_BASE && address < STACK_BASE + STACK_SIZE &&
+        length <= STACK_BASE + STACK_SIZE - address)
+        return (void *)(uintptr_t)address;
+    return GuestRuntime_ResolveData((void *)(uintptr_t)address, length);
+}
+#define AT(a) ((uintptr_t)translated_at((uint32_t)(a), 1))
+#define AT_SPAN(a, n) translated_at((uint32_t)(a), (n))
+#else
 #define AT(a) ((uintptr_t)MEMORIES_SCRATCHPAD_VIEW(a))
+#define AT_SPAN(a, n) ((void *)AT(a))
+#endif
 /* A word the interpreter hands to native code (an argument or a result),
  * which may or may not be a pointer: translated only where the retail view
  * is not mapped (an Android app). Where it is (Windows, Linux) both
  * addresses reach the same page, and the word goes over as it is, so an
  * integer in 0x1F800000-0x1F8003FF is never changed there. */
 #define HANDED(v) (Memories_ScratchpadRetailView ? (uintptr_t)(v) : AT(v))
-static uint32_t l32(uint32_t a) { return *(uint32_t *)AT(a); }
-static uint16_t l16(uint32_t a) { return *(uint16_t *)AT(a); }
-static uint8_t l8(uint32_t a) { return *(uint8_t *)AT(a); }
-static void s32(uint32_t a, uint32_t v) { *(uint32_t *)AT(a) = v; }
-static void s16(uint32_t a, uint16_t v) { *(uint16_t *)AT(a) = v; }
-static void s8(uint32_t a, uint8_t v) { *(uint8_t *)AT(a) = v; }
+static uint32_t l32(uint32_t a)
+{
+#ifdef MEMORIES_TRANSLATED
+    if (Memories_GuestIoContains(a, sizeof(uint32_t))) return Memories_GuestIoRead32(a);
+#endif
+    return *(uint32_t *)AT_SPAN(a, sizeof(uint32_t));
+}
+static uint16_t l16(uint32_t a)
+{
+#ifdef MEMORIES_TRANSLATED
+    if (Memories_GuestIoContains(a, sizeof(uint16_t))) return Memories_GuestIoRead16(a);
+#endif
+    return *(uint16_t *)AT_SPAN(a, sizeof(uint16_t));
+}
+static uint8_t l8(uint32_t a)
+{
+#ifdef MEMORIES_TRANSLATED
+    if (Memories_GuestIoContains(a, sizeof(uint8_t))) return Memories_GuestIoRead8(a);
+#endif
+    return *(uint8_t *)AT(a);
+}
+static void s32(uint32_t a, uint32_t v)
+{
+#ifdef MEMORIES_TRANSLATED
+    if (Memories_GuestIoContains(a, sizeof(uint32_t))) {
+        Memories_GuestIoWrite32(a, v);
+        return;
+    }
+#endif
+    *(uint32_t *)AT_SPAN(a, sizeof(uint32_t)) = v;
+}
+static void s16(uint32_t a, uint16_t v)
+{
+#ifdef MEMORIES_TRANSLATED
+    if (Memories_GuestIoContains(a, sizeof(uint16_t))) {
+        Memories_GuestIoWrite16(a, v);
+        return;
+    }
+#endif
+    *(uint16_t *)AT_SPAN(a, sizeof(uint16_t)) = v;
+}
+static void s8(uint32_t a, uint8_t v)
+{
+#ifdef MEMORIES_TRANSLATED
+    if (Memories_GuestIoContains(a, sizeof(uint8_t))) {
+        Memories_GuestIoWrite8(a, v);
+        return;
+    }
+#endif
+    *(uint8_t *)AT(a) = v;
+}
 
 /* The bank at 0x80180000 holds the natively linked main-menu overlay, but
  * the credits (func_800507D0) load 16 SU sectors of MIPS there and call
@@ -100,6 +177,22 @@ int Memories_MipsInOverlay(uint32_t address)
         return !native_module_resident_at(0x80180000u);
     }
     return (address >= 0x8013A000u && address < 0x80168000u) || (address >= 0x8017A000u && address < 0x80180000u);
+}
+
+void Memories_MipsSetResidentRange(uint32_t address, uint32_t size)
+{
+    resident_base = address;
+    resident_end = size <= UINT32_MAX - address ? address + size : UINT32_MAX;
+}
+
+int Memories_MipsInResident(uint32_t address)
+{
+    return resident_base && address >= resident_base && address < resident_end;
+}
+
+void Memories_MipsSetResidentNativeCalls(int allowed)
+{
+    resident_native_calls = allowed != 0;
 }
 
 static int ensure_stack(void)
@@ -145,6 +238,31 @@ static const MemoriesGuestFunction *find_native(uint32_t address)
         lo++;
     }
     return NULL;
+}
+
+static int has_native_call(uint32_t address)
+{
+    /* SDK routines that have no generated C entry but are implemented by
+     * call_native below must remain native even when their retail address is
+     * inside the resident EXE span. */
+    switch (address) {
+    case 0x8008E360u: case 0x8008E3D0u: case 0x800866A0u: case 0x80086770u:
+    case 0x80086920u: case 0x80086BB0u: case 0x8008E590u:
+    case 0x8008E320u: case 0x8008E390u: case 0x8008FA80u: case 0x8008E5D0u:
+    case 0x8008E680u: case 0x8008E6F0u: case 0x8008E740u: case 0x8008E780u:
+    case 0x8008E800u: case 0x8008E870u: case 0x80058838u:
+        return 1;
+    default:
+        break;
+    }
+    if (Memories_MipsInResident(address) && !resident_native_calls)
+        return 0;
+    /* A community image's own code: the native function is the retail one,
+     * and this call has to run the image's code instead. */
+    if (Memories_CodePatched(address))
+        return 0;
+    if (find_native(address)) return 1;
+    return 0;
 }
 
 static uint32_t call_native(State *s, uint32_t address)
@@ -354,6 +472,9 @@ int Memories_MipsTry(uint32_t address, const uint32_t *args, unsigned count, uin
         if (++s.steps > LIMIT) {
             fail(&s, s.pc, "instruction limit", s.steps);
         }
+#ifdef MEMORIES_TRANSLATED
+        Memories_GuestIoAdvance(1);
+#endif
         i = l32(s.pc);
         op = i >> 26;
         rs = i >> 21 & 31;
@@ -366,7 +487,10 @@ int Memories_MipsTry(uint32_t address, const uint32_t *args, unsigned count, uin
             if (fn == 9) s.r[i >> 11 & 31] = next;
             delay(&s, s.pc + 4);
             if (!target) { s.pc = 0; continue; }
-            if (!Memories_MipsInOverlay(target)) { s.r[2] = call_native(&s, target); s.pc = next; }
+            if (!Memories_MipsInOverlay(target) &&
+                (!Memories_MipsInResident(target) || has_native_call(target))) {
+                s.r[2] = call_native(&s, target); s.pc = next;
+            }
             else s.pc = target;
             continue;
         }
@@ -374,7 +498,10 @@ int Memories_MipsTry(uint32_t address, const uint32_t *args, unsigned count, uin
             target = (s.pc & 0xf0000000u) | ((i & 0x3ffffff) << 2);
             if (op == 3) s.r[31] = next;
             delay(&s, s.pc + 4);
-            if (op == 3 && !Memories_MipsInOverlay(target)) { s.r[2] = call_native(&s, target); s.pc = next; }
+            if (op == 3 && !Memories_MipsInOverlay(target) &&
+                (!Memories_MipsInResident(target) || has_native_call(target))) {
+                s.r[2] = call_native(&s, target); s.pc = next;
+            }
             else s.pc = target;
             continue;
         }
@@ -406,6 +533,9 @@ int Memories_MipsTry(uint32_t address, const uint32_t *args, unsigned count, uin
     }
     current_sp = saved_sp;
     *result = (uint32_t)HANDED(s.r[2]); /* to native code: as the arguments above */
+    if (trace_interpreter())
+        fprintf(stderr, "memories-pc: interpreter: 0x%08x count=%u -> 0x%08x\n",
+                address, count, *result);
     return 0;
 }
 

@@ -173,6 +173,7 @@ static void normalize(Module &module, const json::Object &options) {
 
 class GuestMemoryPass : public PassInfoMixin<GuestMemoryPass> {
   const json::Object &options;
+  const json::Object *codeAddresses = nullptr;
   Function *dataResolver = nullptr;
   Function *fastDataResolver(Module &module) {
     if (dataResolver) return dataResolver;
@@ -289,6 +290,17 @@ class GuestMemoryPass : public PassInfoMixin<GuestMemoryPass> {
     for (auto &operand : constant->operands())
       if (auto *nested = dyn_cast<Constant>(operand.get()))
         validateInitializer(nested, name);
+  }
+  /* The retail address of a function, when the build knows it: a community
+   * image may have replaced the code there, and the image's own code runs
+   * in the interpreter instead of the retail code. */
+  uint32_t guestAddress(const std::string &name) {
+    if (!codeAddresses) return 0;
+    auto *entry = codeAddresses->get(name);
+    if (!entry) return 0;
+    auto address = entry->getAsInteger();
+    if (!address || *address > UINT32_MAX) return 0;
+    return (uint32_t)*address;
   }
   void validateMod(Module &module) {
     if (options.getBoolean("mod_unit").value_or(false)) {
@@ -451,6 +463,30 @@ class GuestMemoryPass : public PassInfoMixin<GuestMemoryPass> {
         wrapper->setAttributes(body->getAttributes());
         body->replaceAllUsesWith(wrapper);
         IRBuilder<> builder(BasicBlock::Create(context, "entry", wrapper));
+        // A community image may have replaced the retail code at this
+        // function's address. The image's own code then runs, in the
+        // interpreter; the native code is the retail code, and would lose
+        // the patch. The image's code has the priority over a mod's hook,
+        // the same way it has it where the game calls through its data.
+        uint32_t address = guestAddress(name);
+        BasicBlock *guest = nullptr;
+        BasicBlock *native = BasicBlock::Create(context, "native", wrapper);
+        // A function that returns a host pointer returns something the
+        // image's code cannot: its own answer is a guest address. Such a
+        // function keeps the native code.
+        Type *resultType = body->getReturnType();
+        bool guestable = !resultType->isPointerTy() ||
+            cast<PointerType>(resultType)->getAddressSpace() == 271;
+        if (address && guestable) {
+          guest = BasicBlock::Create(context, "guest", wrapper);
+          auto patched = module.getOrInsertFunction("Memories_CodePatchedCall",
+            builder.getInt32Ty(), builder.getInt32Ty());
+          Value *changed = builder.CreateCall(patched, {builder.getInt32(address)});
+          builder.CreateCondBr(builder.CreateICmpNE(changed, builder.getInt32(0)), guest, native);
+        } else {
+          builder.CreateBr(native);
+        }
+        builder.SetInsertPoint(native);
         auto resolve = module.getOrInsertFunction("Hooks_Resolve", builder.getPtrTy(), builder.getPtrTy(), builder.getPtrTy());
         Value *target = builder.CreateCall(resolve, {wrapper, body});
         SmallVector<Value *> arguments;
@@ -458,8 +494,81 @@ class GuestMemoryPass : public PassInfoMixin<GuestMemoryPass> {
         auto *call = builder.CreateCall(body->getFunctionType(), target, arguments);
         call->setCallingConv(body->getCallingConv());
         call->setAttributes(body->getAttributes());
-        if (body->getReturnType()->isVoidTy()) builder.CreateRetVoid();
-        else builder.CreateRet(call);
+        BasicBlock *done = BasicBlock::Create(context, "done", wrapper);
+        builder.CreateBr(done);
+        Value *nativeResult = call;
+        SmallVector<std::pair<BasicBlock *, Value *>> guestResults;
+        if (guest) {
+          // The image's code, called the way the game calls it: the MIPS
+          // words in the registers and on the stack. A failure (an
+          // instruction the interpreter does not have) falls back to the
+          // native code, which is the retail code.
+          builder.SetInsertPoint(guest);
+          Value *words = builder.CreateAlloca(
+            ArrayType::get(builder.getInt32Ty(), 12), nullptr, "words");
+          unsigned count = 0;
+          bool expressible = wrapper->arg_size() <= 12;
+          for (auto &argument : wrapper->args()) {
+            if (!expressible) break;
+            Type *type = argument.getType();
+            Value *word = nullptr;
+            if (type->isIntegerTy()) {
+              if (type->getIntegerBitWidth() < 32)
+                word = builder.CreateSExt(&argument, builder.getInt32Ty());
+              else if (type->getIntegerBitWidth() > 32)
+                word = builder.CreateTrunc(&argument, builder.getInt32Ty());
+              else word = &argument;
+            } else if (auto *pointer = dyn_cast<PointerType>(type)) {
+              // A guest pointer is the guest address it names.
+              if (pointer->getAddressSpace() != 271) { word = nullptr; break; }
+              word = builder.CreatePtrToInt(&argument, builder.getInt32Ty());
+            }
+            if (!word) { expressible = false; break; }
+            builder.CreateStore(word, builder.CreateGEP(
+              builder.getInt32Ty(), words, {builder.getInt32((int)count)}));
+            count++;
+          }
+          if (!expressible) {
+            // A shape this call cannot express: the native code it is.
+            builder.CreateBr(native);
+          } else {
+            Value *out = builder.CreateAlloca(builder.getInt32Ty(), nullptr, "out");
+            auto try_ = module.getOrInsertFunction("Memories_MipsTry",
+              FunctionType::get(builder.getInt32Ty(),
+                {builder.getInt32Ty(), builder.getPtrTy(), builder.getInt32Ty(), builder.getPtrTy()},
+                false));
+            // Memories_MipsTry returns 0 when the image's code ran and a
+            // non-zero status when it could not: the status is the failure,
+            // and the failure falls back to the native code.
+            Value *status = builder.CreateCall(try_, {builder.getInt32(address), words,
+              builder.getInt32((int)count), out});
+            BasicBlock *guestDone = BasicBlock::Create(context, "guest.done", wrapper);
+            builder.CreateCondBr(builder.CreateICmpNE(status, builder.getInt32(0)),
+              native, guestDone);
+            builder.SetInsertPoint(guestDone);
+            Value *loaded = builder.CreateLoad(builder.getInt32Ty(), out);
+            Value *guestResult = loaded;
+            if (resultType->isIntegerTy() && resultType->getIntegerBitWidth() < 32)
+              guestResult = builder.CreateTrunc(loaded, resultType);
+            else if (resultType->isIntegerTy() && resultType->getIntegerBitWidth() > 32)
+              guestResult = builder.CreateZExt(loaded, resultType);
+            else if (auto *pointer = dyn_cast<PointerType>(resultType)) {
+              if (pointer->getAddressSpace() != 271) guestResult = loaded;
+              else guestResult = builder.CreateIntToPtr(loaded, resultType);
+            }
+            builder.CreateBr(done);
+            guestResults.push_back({guestDone, guestResult});
+          }
+        }
+        builder.SetInsertPoint(done);
+        if (body->getReturnType()->isVoidTy()) {
+          builder.CreateRetVoid();
+        } else {
+          PHINode *result = builder.CreatePHI(body->getReturnType(), guestResults.size() + 1);
+          result->addIncoming(nativeResult, native);
+          for (auto &entry : guestResults) result->addIncoming(entry.second, entry.first);
+          builder.CreateRet(result);
+        }
         hookTargets.push_back({wrapper, body});
       }
     }
@@ -504,7 +613,9 @@ class GuestMemoryPass : public PassInfoMixin<GuestMemoryPass> {
     }
   }
 public:
-  explicit GuestMemoryPass(const json::Object &options) : options(options) {}
+  explicit GuestMemoryPass(const json::Object &options) : options(options) {
+    if (auto *addresses = options.getObject("code_addresses")) codeAddresses = addresses;
+  }
   PreservedAnalyses run(Module &module, ModuleAnalysisManager &) {
     validateMod(module);
     applyPins(module);

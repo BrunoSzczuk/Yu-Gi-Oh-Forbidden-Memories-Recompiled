@@ -76,6 +76,11 @@ def main():
                 str(ROOT / "tests/pc/host_renderer_boundary_test.c"),
                 str(ROOT / "src/pc/memory.c"),
                 str(ROOT / "src/pc/guest/translated_runtime.c"),
+                str(ROOT / "src/pc/guest/guest_io.c"),
+                # The guest I/O device keeps its registers in a save-state
+                # chunk; the state machinery itself is not what this test is
+                # about.
+                str(ROOT / "tests/pc/state_chunk_stub.c"),
             ]
             if existing:
                 command += [

@@ -96,6 +96,9 @@ FALLBACK = {
     "D_8009B1D5": 0x8009B1D5,             # duel_side_state.h: whose turn, 0 the player
     "gDuel_aDeckCardRecords": 0x801A7E20, # duel_deck_card.h: both decks, 6 bytes a card
     "D_8009B26E": 0x8009B26E,             # a mode's step; 0x80 in a duel: the deck screen before it
+    "D_800E9EF0": 0x800E9EF0,             # display_object_work_slots.h: the card use's two objects
+    "gDuel_wEffectCardID": 0x8009B1D2,    # duel_action_lock.h: the card whose effect runs
+    "D_8009B178": 0x8009B178,             # duel_scene_field_actions.h: the field's phase counters
 }
 # Overlay modules (tools/pc/build_game32.py, MODULES): the load address and
 # the identifier word an image starts with while it is resident.
@@ -596,6 +599,18 @@ class Game:
                 if pinned:   # guest memory: the build's own table says where
                     self._located[where] = int(pinned.group(1), 16)
                 elif "no variable table" in reason:
+                    # A build without a variable table (the translated one,
+                    # macOS) cannot name its own variables. The game's
+                    # variables are at their retail addresses in it (the
+                    # build places them there), so the table of guest
+                    # addresses answers; the table below covers the few it
+                    # does not name.
+                    if where in self.symbols:
+                        self._located[where] = self.symbols[where]
+                        return self._located[where]
+                    if where in FALLBACK:
+                        self._located[where] = FALLBACK[where]
+                        return self._located[where]
                     raise ControlError(f"{where}: {reason}; its retail address would be a guess") from None
                 elif "usage: peek" in reason:   # an executable from before @NAME
                     print(f"yfm_control: WARNING: this game cannot look up {where} (older than @NAME): using its "

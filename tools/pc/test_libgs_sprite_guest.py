@@ -66,6 +66,7 @@ def main():
             fixture,
             "src/pc/memory.c",
             "src/pc/guest/translated_runtime.c",
+            "src/pc/guest/guest_io.c",
             "src/pc/guest/state_io.c",
             "-Wl,-dead_strip",
             "-o",

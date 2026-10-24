@@ -7,8 +7,8 @@
 #endif
 #include "pc/compat/fs.h"
 #include "../../types.h"
-#include "image.h"
 #include "image_loader.h"
+#include "guest_io.h"
 #include "code_patches.h"
 #include "mips.h"
 #include "translated_image.h"
@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #if defined(MEMORIES_TEST_HOOKS) && defined(__linux__)
 #include <string.h>
 #include <sys/mman.h>
@@ -29,11 +30,63 @@ int Memories_ScratchpadRetailView = 1;
 extern void GuestRuntime_RegisterAllGlobals(void);
 void *(*Memories_GuestBranchResolver)(unsigned);
 
+/* MEMORIES_TRACE_GUEST=1 logs every call that leaves the native code for
+ * the interpreter: the code a community image patched runs this way. */
+static int trace_guest(void)
+{
+    static int tracing = -1;
+    const char *value;
+    if (tracing >= 0) return tracing;
+    value = getenv("MEMORIES_TRACE_GUEST");
+    tracing = value && *value && strcmp(value, "0") != 0;
+    return tracing;
+}
+
+static void *resolve_guest_io_memory(uint32_t address, size_t length, void *context)
+{
+    (void)context;
+    return GuestRuntime_ResolveData((void *)(uintptr_t)address, length);
+}
+
 static void *resolve_function(u32 address)
 {
-    const MemoriesGuestFunction *entry = Memories_FindResidentFunction(address);
-    if (entry) return (void *)(uintptr_t)entry->host;
+    const MemoriesExecutionProfile *profile =
+        Memories_TranslatedExecutionProfile();
+    const MemoriesGuestFunction *entry;
+
+    /* A modified executable owns every address in its loaded range. Resolve
+     * it as guest code before consulting the vanilla native map; otherwise a
+     * relocated handler can accidentally invoke an unrelated native function
+     * with the same guest address. */
+    if (profile && profile->mode == MEMORIES_EXECUTION_FULL_GUEST &&
+        Memories_TranslatedExeContains(address)) {
+        Memories_MipsThunkTarget = address;
+        return (void *)(uintptr_t)Memories_MipsThunk;
+    }
+    entry = Memories_FindResidentFunction(address);
+    if (entry) {
+        /* A community image may have changed this very function: the
+         * native code is the retail code, and the image's own code runs in
+         * the interpreter instead. */
+        if (!Memories_CodePatched(address))
+            return (void *)(uintptr_t)entry->host;
+        if (trace_guest())
+            fprintf(stderr, "memories-pc: guest call 0x%08x: interpreted (the image changed it)\n",
+                    address);
+        Memories_MipsThunkTarget = address;
+        return (void *)(uintptr_t)Memories_MipsThunk;
+    }
     if (Memories_MipsInOverlay(address)) {
+        Memories_MipsThunkTarget = address;
+        return (void *)(uintptr_t)Memories_MipsThunk;
+    }
+    /* A code mod may add a callback or move a handler to an address that is
+     * not present in the generated native map. The PS-X EXE is already in
+     * guest RAM, so interpret resident code exactly as we do for overlays;
+     * native functions remain the fast path above. */
+    if (Memories_TranslatedExeContains(address)) {
+        if (trace_guest())
+            fprintf(stderr, "memories-pc: guest call 0x%08x: interpreted\n", address);
         Memories_MipsThunkTarget = address;
         return (void *)(uintptr_t)Memories_MipsThunk;
     }
@@ -41,6 +94,11 @@ static void *resolve_function(u32 address)
 }
 static void *resolve_branch(unsigned address)
 {
+    const MemoriesExecutionProfile *profile =
+        Memories_TranslatedExecutionProfile();
+    if (profile && profile->mode == MEMORIES_EXECUTION_FULL_GUEST &&
+        Memories_TranslatedExeContains(address))
+        return resolve_function(address);
     return GuestRuntime_ResolveFunction((void *)(uintptr_t)address);
 }
 /* Guest memory is ordinary heap memory here, at no fixed address: nothing
@@ -134,6 +192,7 @@ int Memories_GuestMap(void)
     guest_memory = calloc(1, sizeof(*guest_memory));
     if (!guest_memory) return map_failed("no memory for the game's RAM");
     if (GuestRuntime_Bind(guest_memory)) return map_failed("the translated runtime could not take the game's RAM");
+    Memories_GuestIoSetMemoryResolver(resolve_guest_io_memory, NULL);
 #ifdef __APPLE__
     stack_end = pthread_get_stackaddr_np(pthread_self());
     stack_size = pthread_get_stacksize_np(pthread_self());
@@ -177,7 +236,11 @@ int Memories_GuestLoadExeData(const unsigned char *data, size_t size, const char
         fprintf(stderr, "%s: invalid or truncated PS-X EXE\n", name);
         return -1;
     }
+    Memories_GuestIoReset();
+    Memories_MipsSetResidentRange(Memories_LoadLE32(data + 0x18), Memories_LoadLE32(data + 0x1c));
     profile = Memories_TranslatedExecutionProfile();
+    Memories_MipsSetResidentNativeCalls(
+        !profile || profile->mode == MEMORIES_EXECUTION_NATIVE_HYBRID);
     if (profile) {
         printf("Execution profile: %s, mode: %s, entry: 0x%08x\n",
                Memories_ExecutionProfileName(profile->id),
@@ -191,15 +254,18 @@ int Memories_GuestLoadExeData(const unsigned char *data, size_t size, const char
             return -1;
         }
         if (profile->id == MEMORIES_PROFILE_MODIFIED) {
-            /* A community image that keeps the retail layout: its data is
-             * its own, and the code it patched is found here. */
-            printf("Native arm64: a modified image with the retail layout\n");
+            /* A community image that keeps the retail layout: its data is its
+             * own, and the code it patched runs in the interpreter. */
+            printf("Native arm64: a modified image with the retail layout; "
+                   "its own code runs in the interpreter\n");
+            if (Memories_CodePatchedCount())
+                printf("Native arm64: the image changed %u of the retail "
+                       "functions; they run in the interpreter\n",
+                       Memories_CodePatchedCount());
             if (Memories_CodePatchedCount()) {
                 const uint32_t *addresses = Memories_CodePatchedAddresses();
                 unsigned i;
-                printf("Native arm64: the image changed %u of the retail "
-                       "functions: ",
-                       Memories_CodePatchedCount());
+                printf("Native arm64: the image's own code: ");
                 for (i = 0; i < Memories_CodePatchedCount() && i < 8u; ++i)
                     printf("%s0x%08x", i ? ", " : "", addresses[i]);
                 printf("\n");

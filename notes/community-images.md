@@ -103,27 +103,97 @@ On the Kuriboh image the shape rule finds exactly the four functions the
 patch replaced, and nothing else:
 
 ```
-Native arm64: the image changed 4 of the retail functions: 0x80071b64, 0x800727c0, 0x80072a48, 0x8007308c
+Native arm64: the image changed 4 of the retail functions; they run in the interpreter
+Native arm64: the image's own code: 0x80071b64, 0x800727c0, 0x80072a48, 0x8007308c
 ```
+
+## How the port runs the image's own code
+
+A changed function runs in the MIPS interpreter (`src/pc/guest/mips.c`), not
+in the native code. There are two ways into it, and the image's code has the
+priority in both:
+
+- **Through the game's own data.** The AI's opcode table is read from the
+  image (the table is pinned at its retail address, `0x800916E0`), so a
+  handler the patch points at is the patch's code. The interpreter runs it
+  and calls the retail functions back as it goes. This is the path the
+  Kuriboh image's opcodes take.
+- **Through a native call.** The native code's own call to a retail address
+  runs the image's code there instead of the retail code. The build gives
+  every function with a retail address a wrapper
+  (`tools/pc/llvm/guest_ir.cpp`): the wrapper asks whether the image changed
+  that address, and if it did, calls the interpreter with the arguments in
+  the MIPS registers and takes the answer from it. When the interpreter
+  cannot run the image's code, the wrapper falls back to the retail code.
+
+A function whose answer is a host pointer keeps the native code: the
+image's code would answer with a guest address, which the native code cannot
+use.
 
 ## What works today
 
-Checked against the Kuriboh image, on the macOS ARM64 build:
+Checked against the Kuriboh image, on the macOS ARM64 build, through the
+control channel (`tools/pc/yfm_control.py`):
 
-- The image loads, its profile is `modified`, and the game boots.
-- A retail disc keeps its own profile (`vanilla`) and runs the native path,
-  as before.
-- The functions the image changed are found, and the port says which ones they
-  are when the image is loaded.
+- The image loads, the profile is `modified`, and the game boots.
+- The title's menu is the mod's own (its `SU.MRG`): the cursor and the
+  game's selection agree, and the mod's title screen and art are the ones
+  drawn.
+- A duel plays: the hand is dealt, a card is summoned, the opponent's turn
+  runs, attacks land and the duel ends with the results screen.
+- **The opponent plays the mod's rules.** The mod's opcodes run its own
+  code, in the interpreter, with the retail handlers called back. Against
+  the eight duellists the image ships, the interpreter ran the patch's
+  `0x801A9400`, `0x801AA800`, `0x80072A54`, `0x800729D0` and `0x80071B64`:
 
-An image whose layout is not the retail one is refused, with the layout it
-found, instead of running the retail code against an executable that is not
-the retail one:
+  ```
+  $ MEMORIES_TRACE_GUEST=1 ./tmp/pc/macos/memories-arm64
+  memories-pc: guest call 0x801a9400: interpreted
+  memories-pc: guest call 0x801aa800: interpreted
+  memories-pc: guest call 0x80072a54: interpreted
+  ```
 
-```
-Execution profile: unknown, mode: full-guest, entry: 0x800129d8
-Native arm64: this executable does not have the retail layout (load 0x80010000, size 0x001d0000, entry 0x800129d8); the port has no native counterpart for it and cannot run it
-```
+- **The drops are dealt.** A duel won puts a card in the chest and pays the
+  starchips (`chest after: {280: 1}`, `starchips: 5`). The weights are the
+  image's own: the port reads them from `WA_MRG.MRG` (sector 7478), which the
+  mod patched.
+- The port's own mods work with the image: `3d-monsters` reads the empty
+  `MODEL.MRG` and falls back to the card art, and `ai-hard-mode`,
+  `hand-camera` and `yamyi-mods` load. The build leaves them beside the game
+  (`tmp/pc/macos/mods/`), each with its code built for the machine; before
+  that, `python3 tools/pc/build_mod.py mods/<id> --target macos` builds one,
+  or the game says the dylib is missing.
+
+## What still does not work
+
+- **A changed function that keeps the retail function's shape is not
+  found.** The shape rule reads the prologue and the ending of a function.
+  A patch that changes only the instructions in between leaves both alone,
+  and only the hash rule would tell. That rule needs the retail executable,
+  which is not in this repository.
+- **The interpreter is a subset of MIPS I.** It has the integer
+  instructions and COP2 (the software GTE); it has no floating point, and a
+  few instructions are not in it. A native call whose image's code the
+  interpreter cannot run falls back to the retail code, so the patch is
+  lost for that call; a call through the game's data (the opcode table)
+  cannot fall back to anything else, and the game stops with the address it
+  stopped at.
+- **An image that does not keep the retail layout is refused.** The port
+  classifies the executable it loaded (`src/pc/guest/execution_profile.c`):
+
+  | Profile | What it is | What the port does |
+  |---|---|---|
+  | vanilla | the retail executable, by SHA-256 | the native path |
+  | modified | the retail layout, with a different executable | the native path, and the patch's own code in the interpreter |
+  | unknown | neither | refused, with the layout it found in the log |
+
+- The cards the mod adds past the retail 722 are the port's own mod system
+  rather than the image: `notes/more-cards.md` and `notes/modding.md` cover
+  how a card mod is written. (The Kuriboh image keeps the retail 722 and
+  changes what they do.)
+- The image ships no 3D models (`MODEL.MRG` is an empty archive), so the
+  monsters are their card art. The port's `3d-monsters` mod has no models to
+  stand on either.
 
 ## Running an image
 
@@ -152,3 +222,21 @@ python3 tools/pc/make_iso.py "$HOME/Downloads/Yu-Gi-Oh! Kuriboh Evolution (Drop 
 
 The first run asks for the image and remembers it
 (`disc-path.txt` in the user directory), so the next run needs no variable.
+
+The port's own mods are code mods and have to be built for the machine
+before the game can load them:
+
+```sh
+for mod in mods/*/; do python3 tools/pc/build_mod.py "$mod" --target macos; done
+```
+
+The log says which profile the image was:
+
+```
+Execution profile: modified, mode: native-hybrid, entry: 0x800129d8
+Native arm64: a modified image with the retail layout; its own code runs in the interpreter
+```
+
+`MEMORIES_TRACE_GUEST=1` logs every call that leaves the native code for
+the interpreter, and what the interpreter answered, which is how a community
+image's own code shows itself.

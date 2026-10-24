@@ -11,6 +11,7 @@ uint32_t *TextureDump_Tags;
 uint16_t *TextureDump_Shadow;
 int (*TextureDump_Prepare)(int,int,int,int,int,int,int);
 int (*TextureDump_Sample)(int,int,int,int,int,uint32_t *);
+int (*TextureDump_BankSample)(int,int,int,int,int,int,int,int,int,uint32_t *);
 void TextureDump_Init(void) {}
 void TextureDump_Loaded(int x,int y,int w,int h,const uint16_t *p) {(void)x;(void)y;(void)w;(void)h;(void)p;abort();}
 void TextureDump_Moved(int x,int y,int dx,int dy,int w,int h) {(void)x;(void)y;(void)dx;(void)dy;(void)w;(void)h;abort();}

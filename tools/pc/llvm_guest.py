@@ -310,7 +310,8 @@ def process(operation, text, **options):
     return json.loads(result) if operation == "inspect" else result
 
 
-def translate(text, pinned=None, registration=None, *, game_unit=False, hooks=False):
+def translate(text, pinned=None, registration=None, *, game_unit=False, hooks=False,
+              code_addresses=None):
     return process(
         "translate",
         text,
@@ -318,6 +319,7 @@ def translate(text, pinned=None, registration=None, *, game_unit=False, hooks=Fa
         game_unit=game_unit,
         hooks=hooks,
         **({"registration": registration} if registration else {}),
+        **({"code_addresses": code_addresses} if code_addresses else {}),
     )
 
 
