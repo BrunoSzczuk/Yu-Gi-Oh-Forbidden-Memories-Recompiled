@@ -30,6 +30,8 @@ from build_config import (
     game_sources,
     native_sources,
 )
+import code_hashes
+import code_regions
 from direct_overlay_bridges import ENTRIES as DIRECT_OVERLAY_ENTRIES
 from direct_overlay_bridges import emit_bridge, validate_signature
 from guest_build import (
@@ -475,7 +477,7 @@ def generate_function_tables(
         f"extern void {name}(void);\n"
         for name in sorted({r[1] for r in mapped} - set(stubs) - typed_declarations)
     )
-    tables = '#include "pc/guest/image.h"\n#include "pc/mods/exports.h"\n#include "pc/guest/translated_runtime.h"\n#include <stdint.h>\n'
+    tables = '#include "pc/guest/image.h"\n#include "pc/guest/code_patches.h"\n#include "pc/mods/exports.h"\n#include "pc/guest/translated_runtime.h"\n#include <stdint.h>\n'
     tables += "".join(emit_bridge(name) for name in direct_overlay_bridges)
     tables += "".join(f"extern void {name}(void);\n" for name in registrations.values())
     tables += (
@@ -506,6 +508,13 @@ def generate_function_tables(
         + "};\n"
     )
     tables += f"const unsigned Memories_FunctionMapCount = {len(mapped)};\n"
+    # The retail code's hashes: the runtime tells an image's changed
+    # functions from the retail ones with them.
+    tables += code_hashes.emit(ROOT)
+    # Where the retail functions are: the runtime tells an image's changed
+    # functions from the retail ones by their shape, which needs no retail
+    # bytes.
+    tables += code_regions.emit(rows)
     tables += emit_native_calls(mapped, raw_text.values(), stubs)
     shared = [(n, i, b) for n, _, i, b in MODULES if b and n not in GATED_MODULES]
     tables += (

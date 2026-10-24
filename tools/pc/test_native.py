@@ -199,7 +199,20 @@ def main():
             [
                 "tests/pc/translated_image_test.c",
                 "src/pc/guest/translated_image.c",
+                "src/pc/guest/execution_profile.c",
+                "src/pc/guest/code_patches.c",
+                "src/pc/guest/sha256.c",
                 "src/pc/memory.c",
+            ],
+            [],
+            [None],
+        ),
+        (
+            "code-patches",
+            [
+                "tests/pc/code_patches_test.c",
+                "src/pc/guest/code_patches.c",
+                "src/pc/guest/sha256.c",
             ],
             [],
             [None],

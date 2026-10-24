@@ -20,6 +20,9 @@ INLINE_PATH = re.compile(
     r")(?::[0-9][^`]*)?`"
 )
 UNTRACKED_PATH_PREFIXES = ("src/hirata/", "tools/vendor/")
+# Files a tool writes when it is run: the retail disc is needed for them,
+# so they are absent until someone has it (notes/community-images.md).
+GENERATED_PATHS = ("config/slus_01411/code_hashes.json",)
 REFERENCE_DEFINITION = re.compile(
     r"^[ \t]{0,3}\[(?P<label>[^\]]+)\]:[ \t]*(?P<rest>.*)$"
 )
@@ -162,6 +165,8 @@ def resolve_target(
         return Problem(note, line_number, target, "escapes repository")
     normalized = relative.as_posix()
     if root_relative and normalized.startswith(UNTRACKED_PATH_PREFIXES):
+        return None
+    if root_relative and normalized in GENERATED_PATHS:
         return None
     if not resolved.exists():
         return Problem(note, line_number, target, "does not exist")

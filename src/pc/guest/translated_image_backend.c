@@ -8,6 +8,8 @@
 #include "pc/compat/fs.h"
 #include "../../types.h"
 #include "image.h"
+#include "image_loader.h"
+#include "code_patches.h"
 #include "mips.h"
 #include "translated_image.h"
 #include "translated_runtime.h"
@@ -170,9 +172,39 @@ int Memories_GuestMap(void)
 int Memories_GuestLoadExeData(const unsigned char *data, size_t size, const char *name)
 {
     u32 entry;
+    const MemoriesExecutionProfile *profile;
     if (Memories_LoadTranslatedExe(guest_memory, data, size, &entry)) {
         fprintf(stderr, "%s: invalid or truncated PS-X EXE\n", name);
         return -1;
+    }
+    profile = Memories_TranslatedExecutionProfile();
+    if (profile) {
+        printf("Execution profile: %s, mode: %s, entry: 0x%08x\n",
+               Memories_ExecutionProfileName(profile->id),
+               Memories_ExecutionModeName(profile->mode), profile->entry);
+        if (profile->mode == MEMORIES_EXECUTION_FULL_GUEST) {
+            fprintf(stderr,
+                    "Native arm64: this executable does not have the retail "
+                    "layout (load 0x%08x, size 0x%08x, entry 0x%08x); the port "
+                    "has no native counterpart for it and cannot run it\n",
+                    profile->load_address, profile->image_size, profile->entry);
+            return -1;
+        }
+        if (profile->id == MEMORIES_PROFILE_MODIFIED) {
+            /* A community image that keeps the retail layout: its data is
+             * its own, and the code it patched is found here. */
+            printf("Native arm64: a modified image with the retail layout\n");
+            if (Memories_CodePatchedCount()) {
+                const uint32_t *addresses = Memories_CodePatchedAddresses();
+                unsigned i;
+                printf("Native arm64: the image changed %u of the retail "
+                       "functions: ",
+                       Memories_CodePatchedCount());
+                for (i = 0; i < Memories_CodePatchedCount() && i < 8u; ++i)
+                    printf("%s0x%08x", i ? ", " : "", addresses[i]);
+                printf("\n");
+            }
+        }
     }
     printf("Native arm64: loaded PS-X EXE, guest entry 0x%08x\n", entry);
     return 0;
