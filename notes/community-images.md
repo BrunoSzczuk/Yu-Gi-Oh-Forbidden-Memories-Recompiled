@@ -300,6 +300,14 @@ translated runtime: invalid guest data span at 0xf0f0000b (4 bytes)
 The hash rule would tell those functions apart, and it needs the retail
 executable, which this repository does not carry.
 
+Its new game hung, for a different reason: the image replaced the disc's
+starter deck pools with its own data, in a layout the game reads
+differently, and the port drew from them for ever
+([starter deck pools](starter-deck-pools.md#a-discs-own-pools-may-be-a-mods)).
+The port reads the disc's pools with bounds now, so the new game ends, and
+`mods/clt-starter-deck` writes the deck the image's own pools describe, so
+that a new game has cards to play with.
+
 ## What still does not work
 
 - **A changed function that keeps the retail function's shape is not
