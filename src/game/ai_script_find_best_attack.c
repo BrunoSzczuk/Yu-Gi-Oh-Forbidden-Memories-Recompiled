@@ -33,7 +33,7 @@ void AiScript_FindBestAttack(void) {
     r = &t[AI_SLOT_OWN_MONSTER_FIRST];
     gAiScript_State.attack_best_stat = 0;
 
-    while (i < DUEL_FIELD_ROW_SIZE + 1) {
+    for (; i < DUEL_FIELD_ROW_SIZE + 1; i++, r++) {
         if (r->card_id == 0) {
             continue;
         }
