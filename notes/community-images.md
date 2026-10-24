@@ -333,6 +333,12 @@ python3 tools/pc/make_iso.py "$HOME/Downloads/Yu-Gi-Oh! Kuriboh Evolution (Drop 
 The first run asks for the image and remembers it
 (`disc-path.txt` in the user directory), so the next run needs no variable.
 
+An image may rename every file it holds: the "Galaxy of Gods" image calls
+its executable `GOG_VNT.223` and its data files `GOG_SD*.23`. The port
+takes the executable the disc's own `SYSTEM.CNF` names (`BOOT = cdrom:\
+GOG_VNT.223;1`), which is where the PlayStation would look too, and the
+image's code asks for its own files by their own names.
+
 The port's own mods are code mods and have to be built for the machine
 before the game can load them:
 

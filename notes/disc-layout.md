@@ -90,3 +90,11 @@ python3 tools/pc/make_iso.py "Yu-Gi-Oh! Forbidden Memories (USA).bin" \
 A sector with 2,324 bytes of data (a Form 2 sector) has no place in a
 2,048-byte sector, and the tool says so instead of writing a broken image.
 
+The executable is the file the disc's own `SYSTEM.CNF` names
+(`BOOT = cdrom:\SLUS_014.11;1` on the retail disc). A community image may
+rename it — the "Galaxy of Gods" image calls it `GOG_VNT.223` — and the
+port follows the `SYSTEM.CNF` rather than the retail name. The image's
+data segment may also be shorter than its own header says (the zeros at
+its end trimmed away), so the port reports the sectors it read, not the
+bytes the file holds.
+
