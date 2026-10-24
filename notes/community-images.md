@@ -308,6 +308,24 @@ The port reads the disc's pools with bounds now, so the new game ends, and
 `mods/clt-starter-deck` writes the deck the image's own pools describe, so
 that a new game has cards to play with.
 
+Its new game hung once more, for another reason: the name entry shows the
+image's own text, and the string the retail code asks for by id is the mod's
+string at that id. The mod's string has no end of its own, so the message box
+prints its letters and never finishes, and the game waits for a text that will
+never be done. The box that shows it is the one the retail opens after the
+name is saved ("Choose a starter Deck:"), and the wait for it is in
+`src/overlays/password/name_entry_dialog.c`.
+
+The port gives that wait up on now
+([a text that never ends](text-control-bytecode.md#a-text-that-never-ends)):
+a box that has printed nothing for two seconds, once the player has asked for
+the message to go on, is left behind, and so is a wait that has lasted thirty
+seconds. A box whose text has ended — the retail's own text — is never given
+up on, so the retail's own frames are the ones it always had. On the CLT image
+the message closes about two and a half seconds after the press; on the retail
+image the same press still leaves the box on screen for the player to dismiss,
+as it always did.
+
 ## What still does not work
 
 - **A changed function that keeps the retail function's shape is not
