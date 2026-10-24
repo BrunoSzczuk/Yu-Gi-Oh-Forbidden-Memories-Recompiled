@@ -125,6 +125,30 @@ static void make_iso_disc(const char *path, int malformed)
     assert(!fclose(file));
 }
 
+/* A community "free version" image ships its executable with the magic's
+ * first byte wiped; the rest of the header is the retail one, so the disc
+ * is still the disc. */
+static void make_wiped_disc(const char *path)
+{
+    unsigned char sector[2048] = {0};
+    FILE *file = fopen(path, "wb");
+    int at;
+    assert(file);
+    for (at = 0; at < 23; at++) {
+        memset(sector, 0, sizeof(sector));
+        if (at == 16) {
+            sector[0] = 1; memcpy(sector + 1, "CD001", 5);
+            little(sector + 158, 20); little(sector + 166, 2048);
+        } else if (at == 20) {
+            sector[0] = 46;
+            little(sector + 2, 21); little(sector + 10, 4096);
+            sector[32] = 13; memcpy(sector + 33, "SLUS_014.11;1", 13);
+        } else if (at == 21) memcpy(sector, "\0S-X EXE", 8);
+        assert(fwrite(sector, 1, sizeof(sector), file) == sizeof(sector));
+    }
+    assert(!fclose(file));
+}
+
 static int change_dir(const char *path)
 {
 #ifdef _WIN32
@@ -201,6 +225,15 @@ int main(int argc, char **argv)
         make_iso_disc(iso, 1);
         assert(GameFiles_SelectDisc(iso, why, sizeof(why)) == -1);
         assert(access(saved, F_OK));
+    } else if (!strcmp(argv[1], "wiped")) {
+        /* An image whose executable has the magic's first byte wiped is still
+         * the disc: it is taken, and its executable comes out of it. */
+        snprintf(iso, sizeof(iso), "%s/free-version.iso", root);
+        make_wiped_disc(iso);
+        assert(GameFiles_SelectDisc(iso, why, sizeof(why)) == 0);
+        assert(!strcmp(GameFiles_Disc(why, sizeof(why)), iso));
+        exe = GameFiles_ReadExecutable(iso, &length);
+        assert(exe && length == 4096 && !memcmp(exe, "\0S-X EXE", 8)); free(exe);
     } else if (!strcmp(argv[1], "named")) {
         /* An image that renamed its executable: the disc is found through
          * the name in its own SYSTEM.CNF, and its executable comes out. */

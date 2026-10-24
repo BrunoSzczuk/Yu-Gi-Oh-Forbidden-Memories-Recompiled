@@ -98,3 +98,10 @@ data segment may also be shorter than its own header says (the zeros at
 its end trimmed away), so the port reports the sectors it read, not the
 bytes the file holds.
 
+The magic of that executable may itself be one byte short: a community
+"free version" image ships it with the `P` of `PS-X EXE` wiped and the
+rest of the header unchanged (the load address, the size and the entry
+point are the retail ones, byte for byte). The port reads the magic from
+its second byte on, so such an image is the disc it says it is
+(`Memories_ExeMagicOk`, `src/pc/guest/exe_magic.h`).
+

@@ -272,6 +272,34 @@ part of the name; the port steps over it (`retail_name` in
 no name resolved at all, and every card a mod named was refused with
 `"replace" must name a card of the disc`.
 
+## Other community images
+
+Two more images were tried against the port, and both are taken:
+
+- The "Galaxy of Gods" image renames every file it holds: its executable
+  is `GOG_VNT.223` and its data files are `GOG_SD*.23`. The port takes the
+  executable the disc's own `SYSTEM.CNF` names (`BOOT = cdrom:\
+  GOG_VNT.223;1`), the image's code asks for its own files by their own
+  names, and the image's own drop patch deals five cards a win, which is
+  what its name promises.
+- The "CLT Chronicle Memories [FREE VERSION]" image ships its executable
+  with the magic's first byte wiped (`\0S-X EXE`) and the rest of the
+  header unchanged, so the port reads the magic from its second byte on
+  ([disc layout](disc-layout.md#the-image-the-port-reads)). It keeps the
+  retail layout, the port loads it, and it boots.
+
+The CLT image shows what the port cannot do yet. It rewrote many
+functions in place, keeping their shape, so the shape rule finds only the
+four the drop patch replaced, and the port runs the retail code where the
+mod has its own. The duel then stops with the address it stopped at:
+
+```
+translated runtime: invalid guest data span at 0xf0f0000b (4 bytes)
+```
+
+The hash rule would tell those functions apart, and it needs the retail
+executable, which this repository does not carry.
+
 ## What still does not work
 
 - **A changed function that keeps the retail function's shape is not
