@@ -9,6 +9,7 @@
  * pages are ordinary strings for the game's text box. */
 #include "drops.h"
 #include "cards.h"
+#include "community_drops.h"
 #include "tables.h"
 #include "pc/platform/settings.h"
 #include "pc/rng.h"
@@ -31,6 +32,11 @@ int CardDrops_Count(void)
 {
     int wanted = Tables_CardDropsLock(NULL);
     if (!wanted) wanted = Settings_Get(SET_CARD_DROPS);
+    /* A disc that patches the drop says how many cards a win deals
+     * (community_drops.h); the player's own value replaces it when it is not
+     * the console's one card, so a player who wants a number of their own
+     * has it (notes/card-drops.md). */
+    if (wanted <= 1) wanted = CommunityDrops_Count();
     if (wanted < 1) wanted = 1;
     if (wanted > CARD_DROPS_MAX) wanted = CARD_DROPS_MAX;
     return wanted;

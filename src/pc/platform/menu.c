@@ -24,6 +24,7 @@
 #include "pc/guest/state.h"
 #include "pc/mods/mods.h"
 #include "pc/cards/tables.h"
+#include "pc/cards/community_drops.h"
 #include "pc/render/texture_pack.h"
 #include "paths.h"
 #include "pc/sdk/display.h"
@@ -1981,40 +1982,58 @@ static int item_action(const Item *item)
  * number and its label names the mod. The player's own value stays in the
  * settings, untouched, for when the mod is gone. The lock is read at
  * startup (tables.c), after the menu is made, so this is asked as the menu
- * is drawn and used. */
+ * is drawn and used.
+ *
+ * A disc that patches the drop says how many cards a win deals
+ * (community_drops.h): its number stands in the slider while the player has
+ * set none of their own, and the label names the disc. The player's own
+ * number replaces it (CardDrops_Count). */
 static int card_drops_lock;
+static int card_drops_disc;
 static void update_card_drops_item(void)
 {
     static char label[96];
     static Item *item;
     static int shown = -1;
     const char *id = NULL, *name = NULL;
-    int i;
+    int i, state;
     card_drops_lock = Tables_CardDropsLock(&id);
+    /* The disc's count, while the player's own value is the console's one
+     * card: a player who sets a number of their own has it instead. */
+    card_drops_disc = Settings_Get(SET_CARD_DROPS) <= 1 ? CommunityDrops_Count() : 0;
     if (!item) {
         for (i = 0; i < menus[MENU_GAME].count && !item; i++)
             if (menus[MENU_GAME].items[i].setting == SET_CARD_DROPS) item = &menus[MENU_GAME].items[i];
         if (!item) return;
     }
-    if (card_drops_lock == shown) return;
-    shown = card_drops_lock;
-    if (!card_drops_lock) {
-        item->label = "Card drops";
-        item->flags &= ~ITEM_DISABLED;
+    state = card_drops_lock ? card_drops_lock : -card_drops_disc;
+    if (state == shown) return;
+    shown = state;
+    if (card_drops_lock) {
+        for (i = 0; i < Mods_Count() && !name; i++)
+            if (id && !strcmp(Mods_Id(i), id)) name = Mods_Name(i);
+        snprintf(label, sizeof(label), "Card drops (set by %.48s)", name ? name : id ? id : "a mod");
+        item->label = label;
+        item->flags |= ITEM_DISABLED;
         return;
     }
-    for (i = 0; i < Mods_Count() && !name; i++)
-        if (id && !strcmp(Mods_Id(i), id)) name = Mods_Name(i);
-    snprintf(label, sizeof(label), "Card drops (set by %.48s)", name ? name : id ? id : "a mod");
-    item->label = label;
-    item->flags |= ITEM_DISABLED;
+    if (card_drops_disc) {
+        snprintf(label, sizeof(label), "Card drops (this disc deals %d)", card_drops_disc);
+        item->label = label;
+    } else {
+        item->label = "Card drops";
+    }
+    item->flags &= ~ITEM_DISABLED;
 }
 
 /* What a slider shows: Card drops shows a mod's lock in place of the
- * player's own value. */
+ * player's own value, and a disc's count while the player has set none. */
 static int slider_value(const Item *item)
 {
-    if (item->setting == SET_CARD_DROPS && card_drops_lock) return card_drops_lock;
+    if (item->setting == SET_CARD_DROPS) {
+        if (card_drops_lock) return card_drops_lock;
+        if (card_drops_disc) return card_drops_disc;
+    }
     return Settings_Get(item->setting);
 }
 

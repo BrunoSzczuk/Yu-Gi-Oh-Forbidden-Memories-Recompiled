@@ -157,6 +157,14 @@ control channel (`tools/pc/yfm_control.py`):
   starchips (`chest after: {280: 1}`, `starchips: 5`). The weights are the
   image's own: the port reads them from `WA_MRG.MRG` (sector 7478), which the
   mod patched.
+- **A win deals the image's own number of cards.** The image patches the
+  results screen so that a win deals fifteen cards ("Drop x15"); the port
+  reads that number from the code the guest runs and deals the same
+  ([card drops](card-drops.md#a-disc-that-sets-it)). The log says it:
+
+  ```
+  drops: the disc's results screen deals 15 cards a win
+  ```
 - The port's own mods work with the image: `3d-monsters` reads the empty
   `MODEL.MRG` and falls back to the card art, and `ai-hard-mode`,
   `hand-camera` and `yamyi-mods` load. The build leaves them beside the game
@@ -270,7 +278,9 @@ no name resolved at all, and every card a mod named was refused with
   found.** The shape rule reads the prologue and the ending of a function.
   A patch that changes only the instructions in between leaves both alone,
   and only the hash rule would tell. That rule needs the retail executable,
-  which is not in this repository.
+  which is not in this repository. The drop patch is one of those: the port's
+  own code deals the cards instead, in the number the patch asks for
+  ([card drops](card-drops.md#a-disc-that-sets-it)).
 - **The interpreter is a subset of MIPS I.** It has the integer
   instructions and COP2 (the software GTE); it has no floating point, and a
   few instructions are not in it. A native call whose image's code the

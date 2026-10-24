@@ -49,6 +49,37 @@ the duels have it back.
 The cards themselves come as below, from the same rolls: only how many
 changes.
 
+## A disc that sets it
+
+A community image may patch the results screen so that a won duel deals more
+than one card: the patch jumps to a loop of its own that draws a card into a
+buffer as many times as a limit allows. The images named "Drop x15" (Kuriboh
+Evolution and Remastered Perfected) are named for the fifteen cards their
+limit of sixteen deals.
+
+The port runs its own native code where the patch is, so the patch's code
+never runs ([community images](community-images.md#how-the-port-runs-the-images-own-code));
+the port reads what the disc asks for instead
+(`src/pc/cards/community_drops.c`) and deals that many cards:
+
+- The rule is read from the code the guest runs, at the results screen. The
+  disc's executable holds a copy of the patch's loop with a limit of six (five
+  cards); the screen package the game loads for a duel holds the copy that
+  runs, with the limit of sixteen. The count is therefore read while the guest
+  is in a duel, and that is the one kept.
+- The player's own number (Game > Card drops) replaces it when it is not the
+  console's one card, and a mod's lock replaces both.
+
+The menu shows the disc's number once the port has read it (`Card drops (this
+disc deals 15)`), and the log says which it is:
+
+```text
+drops: the disc's results screen deals 15 cards a win
+```
+
+A disc that does not patch the results screen has no rule: the port deals the
+console's one card, as retail does.
+
 ## On RESULTS OF DUEL
 
 The SPOILS page is the game's own: it shows one card, which the game awards
@@ -115,6 +146,9 @@ states from earlier builds fail to load ("game variable ... moved").
 
 - `src/pc/cards/drops.c`, `drops.h`: dealing, awarding, page order and the
   page text; `CardDrops_Count`, a mod's lock or the player's setting.
+- `src/pc/cards/community_drops.c`, `community_drops.h`: the count a disc's
+  own patch asks for, read from the guest's memory at the results screen
+  ([a disc that sets it](#a-disc-that-sets-it)).
 - `src/pc/cards/tables.c` (`read_values`, `Tables_CardDropsLock`): a mod's
   `"limits"` `"card_drops"`, which mod set it, and the note when another
   mod's replaces it.
@@ -150,6 +184,12 @@ opponent's life points zeroed in a saved state) and checks that:
 game's own roll; and a mod's lock: 5 and 99 over the player's 1 and 99,
 the player's value back without the mod, the later of two mods, and the
 values left out with their notes.
+
+`tests/pc/community_drops_test.c` (CTest `pc_community_drops`) checks the
+count a disc's patch asks for: the retail code at the prize's draw is no
+patch, the patch's loop gives five cards with its limit of six and fifteen
+with its limit of sixteen, and a jump out of the image, a loop without a
+limit and an image that is not there are none of them a patched disc.
 
 `python3 tools/pc/test_card_drops_mod.py` wins the same duel with mods in a
 test user directory: a mod's 5 over the player's 99 deals 5, a mod's 99

@@ -612,6 +612,15 @@ if(BUILD_TESTING)
     add_executable(memories_card_drops_test tests/pc/card_drops_test.c src/pc/cards/tables.c tests/pc/duelists_stubs.c src/pc/mods/json.c)
     target_include_directories(memories_card_drops_test PRIVATE src)
     target_compile_definitions(memories_card_drops_test PRIVATE MEMORIES_PC)
+    # The community drop mod's count, read out of the disc's executable
+    # (notes/card-drops.md, "The community drop mod").
+    add_executable(memories_community_drops_test tests/pc/community_drops_test.c)
+    target_include_directories(memories_community_drops_test PRIVATE src)
+    target_compile_definitions(memories_community_drops_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_community_drops_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    add_test(NAME pc_community_drops COMMAND memories_community_drops_test)
     # The game's headers (drops.c's save and reward layouts) are 32-bit.
     if(NOT WIN32)
         target_compile_options(memories_card_drops_test PRIVATE -m32)
