@@ -326,6 +326,17 @@ the message closes about two and a half seconds after the press; on the retail
 image the same press still leaves the box on screen for the player to dismiss,
 as it always did.
 
+The campaign's own first screen hung the same way, and for the same reason:
+the story's dialog is the image's text too, and it never ended either. The
+story waits are bounded now, and so is the scene: the image's own scene
+script stops where the retail's opens the campaign map, and a scene whose
+script has stopped for half a minute ends the way the retail's fade-out ends
+it
+([a scene whose script has stopped](story-script-command-table.md#a-scene-whose-script-has-stopped)).
+On the CLT image the campaign reaches the map, about half a minute after the
+story stops; on the retail image the campaign runs the same frames as it
+always did.
+
 ## What still does not work
 
 - **A changed function that keeps the retail function's shape is not
