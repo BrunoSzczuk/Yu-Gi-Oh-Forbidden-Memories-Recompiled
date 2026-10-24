@@ -27,7 +27,9 @@
 #include "pc/compat/posix.h"
 
 #define RAW_SECTOR 2352
+#define ISO_SECTOR 2048
 #define USER_DATA 24
+#define SECTOR 2048
 #define QUEUE 8
 #define DATA_SECTORS_PER_TICK 8
 
@@ -39,6 +41,7 @@ typedef struct Pending {
 
 static int disc = -1;
 static int disc_sectors;
+static int disc_sector_size = RAW_SECTOR;
 static Pending queue[QUEUE];
 static volatile unsigned queue_head, queue_tail;
 static int next_id = 1;
@@ -79,9 +82,28 @@ int CdPosToInt(DslLOC *loc) { return loc_to_lba(loc); }
 
 static int read_physical(int lba, u8 *out)
 {
-    int ok = disc >= 0 && lba >= 0 && lba < disc_sectors &&
-        pread(disc, out, RAW_SECTOR, (off_t)lba * RAW_SECTOR) == RAW_SECTOR;
-    if (ok) disc_bytes_total += RAW_SECTOR;
+    int ok = disc >= 0 && lba >= 0 && lba < disc_sectors;
+    if (ok) {
+        if (disc_sector_size == RAW_SECTOR) {
+            ok = pread(disc, out, RAW_SECTOR, (off_t)lba * RAW_SECTOR) == RAW_SECTOR;
+        } else {
+            /* An ISO 9660 image's sectors carry the data themselves; the
+             * drive hands the guest the MODE2/Form1 framing a raw image has
+             * (the same framing read_raw builds), so it is made here. */
+            DslLOC loc;
+            ok = pread(disc, out + USER_DATA, SECTOR, (off_t)lba * ISO_SECTOR) == SECTOR;
+            if (ok) {
+                memset(out, 0, USER_DATA);
+                memset(out + 1, 0xff, 10);
+                lba_to_loc(lba, &loc);
+                out[12] = loc.minute; out[13] = loc.second; out[14] = loc.sector;
+                out[15] = 2;
+                out[18] = out[22] = 0x08;
+                memset(out + USER_DATA + SECTOR, 0, RAW_SECTOR - USER_DATA - SECTOR);
+            }
+        }
+    }
+    if (ok) disc_bytes_total += disc_sector_size;
     return ok;
 }
 
@@ -156,12 +178,17 @@ int DsInit(void)
         }
         {
             struct stat info;
+            disc_sector_size = GameFiles_SectorSize(disc);
+            if (!disc_sector_size) {
+                Crash_ReportFatal("disc", "the disc image is neither a raw MODE2 image nor an ISO 9660 image");
+                _exit(1);
+            }
             if (fstat(disc, &info) || info.st_size < 0 ||
-                (uint64_t)info.st_size / RAW_SECTOR > INT32_MAX) {
+                (uint64_t)info.st_size / disc_sector_size > INT32_MAX) {
                 Crash_ReportFatal("disc", "cannot determine disc image size");
                 _exit(1);
             }
-            disc_sectors = (int)(info.st_size / RAW_SECTOR);
+            disc_sectors = (int)(info.st_size / disc_sector_size);
         }
     }
     TextureDump_SetDiscFiles(Memories_DiscFileInfo);

@@ -70,6 +70,29 @@ static void make_disc(const char *path, int malformed)
     assert(!fclose(file));
 }
 
+/* The same disc as an ISO 9660 image: 2048 bytes a sector, the data itself,
+ * the volume descriptor at the sector 16 as the ISO 9660 wants it. */
+static void make_iso_disc(const char *path, int malformed)
+{
+    unsigned char sector[2048] = {0};
+    FILE *file = fopen(path, "wb");
+    int at;
+    assert(file);
+    for (at = 0; at < 23; at++) {
+        memset(sector, 0, sizeof(sector));
+        if (at == 16) {
+            sector[0] = 1; memcpy(sector + 1, "CD001", 5);
+            little(sector + 158, 20); little(sector + 166, 2048);
+        } else if (at == 20) {
+            sector[0] = malformed ? 34 : 46;
+            little(sector + 2, 21); little(sector + 10, 4096);
+            sector[32] = 13; memcpy(sector + 33, "SLUS_014.11;1", 13);
+        } else if (at == 21) memcpy(sector, "PS-X EXE", 8);
+        assert(fwrite(sector, 1, sizeof(sector), file) == sizeof(sector));
+    }
+    assert(!fclose(file));
+}
+
 static int change_dir(const char *path)
 {
 #ifdef _WIN32
@@ -84,10 +107,10 @@ static int change_dir(const char *path)
 
 int main(int argc, char **argv)
 {
-    char why[1024], saved[1024], buffer[1024];
+    char why[1024], saved[1024], buffer[1024], iso[1024];
     FILE *file;
     size_t length;
-    unsigned char *exe;
+    unsigned char *exe, header[2048];
     assert(argc == 2);
     assert(scratch_dir(root, sizeof(root), "memories-rom"));
     assert(!change_dir(root));
@@ -122,6 +145,30 @@ int main(int argc, char **argv)
         assert(GameFiles_SelectDisc(valid, why, sizeof(why)) == -1);
         assert(strstr(why, "Could not save"));
         assert(!rmdir(saved));
+    } else if (!strcmp(argv[1], "iso")) {
+        /* An .iso of the disc is taken as the disc image: the folder search
+         * finds it, its sectors are read as ISO 9660 ones, and the game's
+         * executable comes out of it as it does from a raw image. */
+        snprintf(iso, sizeof(iso), "%s/forbidden-memories.iso", root);
+        make_iso_disc(iso, 0);
+        assert(GameFiles_Setup(why, sizeof(why)) == 1);
+        assert(picks == 0);
+        assert(!strcmp(GameFiles_Disc(why, sizeof(why)), iso));
+        file = fopen(iso, "rb"); assert(file);
+        assert(GameFiles_SectorSize(fileno(file)) == 2048);
+        assert(GameFiles_ReadSector(file, 16, header) && !memcmp(header + 1, "CD001", 5));
+        assert(GameFiles_ReadSector(file, 21, header) && !memcmp(header, "PS-X EXE", 8));
+        assert(!fclose(file));
+        exe = GameFiles_ReadExecutable(iso, &length);
+        assert(exe && length == 4096 && !memcmp(exe, "PS-X EXE", 8)); free(exe);
+        /* The raw image of the same disc is 2352 bytes a sector. */
+        file = fopen(valid, "rb"); assert(file);
+        assert(GameFiles_SectorSize(fileno(file)) == 2352);
+        assert(!fclose(file));
+        /* An .iso that is not the disc is not taken. */
+        make_iso_disc(iso, 1);
+        assert(GameFiles_SelectDisc(iso, why, sizeof(why)) == -1);
+        assert(access(saved, F_OK));
     } else {
         if (!strcmp(argv[1], "remembered") || !strcmp(argv[1], "moved")) {
             file = fopen(saved, "wb"); assert(file);

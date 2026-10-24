@@ -57,3 +57,36 @@ The disc directory order places the executable and small data files first,
 followed by the large model archive, then XA audio and movie data at the end.
 This order and the exact LBAs must be retained when investigating streaming or
 seek behavior.
+
+## The image the port reads
+
+The port takes the disc as an image of the game, and reads either kind of it:
+
+| Kind | Sector size | What the sector holds | How it is told apart |
+|---|---:|---|---|
+| raw `.bin` | 2,352 bytes | a 24-byte MODE2 header, then the 2,048 bytes of data | the volume descriptor at the sector 16 has `CD001` after the header |
+| `.iso` | 2,048 bytes | the 2,048 bytes of data | the volume descriptor at the sector 16 has `CD001` at its front |
+
+Both carry the same ISO 9660 filesystem at the same LBAs; the raw one only
+wraps each sector in the MODE2/2352 frame the drive reads. The port tells
+them apart by the volume descriptor (`GameFiles_SectorSize`,
+`src/pc/platform/game_files.c`) and reads the sectors of either
+(`GameFiles_ReadSector`).
+
+The drive hands the guest the MODE2/Form1 framing in both cases
+(`src/pc/sdk/libds.c`): an ISO 9660 sector has no header of its own, so the
+drive builds the frame around the data it read, and the rest of the port
+(directory, file transfers, STR, XA) is the same for either image.
+
+A `.bin` becomes an `.iso` by dropping the 24 bytes of header of each sector;
+the sectors keep their places, so the volume descriptor stays at the sector
+16 and every file's extent is unchanged:
+
+```sh
+python3 tools/pc/make_iso.py "Yu-Gi-Oh! Forbidden Memories (USA).bin" \
+    -o "Yu-Gi-Oh! Forbidden Memories (USA).iso"
+```
+
+A sector with 2,324 bytes of data (a Form 2 sector) has no place in a
+2,048-byte sector, and the tool says so instead of writing a broken image.
+

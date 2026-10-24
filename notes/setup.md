@@ -39,6 +39,12 @@ one anti-piracy branch inside `DATA/WA_MRG.MRG`; input verification recognizes
 that patched image and reports it explicitly instead of accepting it as the
 project reference.
 
+The game itself is given to the port as an image of the disc: the raw `.bin`
+of a `.bin`/`.cue` pair, or an `.iso` of the same disc
+([disc layout](disc-layout.md#the-image-the-port-reads)). Both are read the
+same way; nothing has to be converted first. A `.bin` becomes an `.iso` with
+`python3 tools/pc/make_iso.py <the .bin>`.
+
 ## Workspace rule
 
 Run all commands from the repository root. Project scripts reject execution

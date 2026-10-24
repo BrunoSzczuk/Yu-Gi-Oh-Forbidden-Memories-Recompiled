@@ -10,8 +10,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define RAW_SECTOR 2352
+#define ISO_SECTOR 2048
 #define USER_DATA 24
 #define SECTOR 2048
 #define PATH_MAX_ 1024
@@ -29,27 +31,60 @@ static unsigned le32(const unsigned char *bytes)
     return bytes[0] | (unsigned)bytes[1] << 8 | (unsigned)bytes[2] << 16 | (unsigned)bytes[3] << 24;
 }
 
-int GameFiles_ReadSector(FILE *file, unsigned lba, unsigned char *out)
+/* The image's sector size: a raw MODE2 image carries 24 bytes of header
+ * before the 2048 bytes of data, an ISO 9660 image the data itself. The
+ * volume descriptor at the sector 16 tells which: "CD001" after the header
+ * (raw) or at the front (ISO). */
+int GameFiles_SectorSize(int fd)
+{
+    unsigned char sector[RAW_SECTOR];
+    if (pread(fd, sector, RAW_SECTOR, (off_t)16 * RAW_SECTOR) == RAW_SECTOR &&
+        !memcmp(sector + USER_DATA + 1, "CD001", 5)) {
+        return RAW_SECTOR;
+    }
+    if (pread(fd, sector, ISO_SECTOR, (off_t)16 * ISO_SECTOR) == ISO_SECTOR &&
+        !memcmp(sector + 1, "CD001", 5)) {
+        return ISO_SECTOR;
+    }
+    return 0;
+}
+
+/* One sector of the image, given its sector size (RAW_SECTOR or ISO_SECTOR):
+ * the 2048 bytes of data, wherever the image keeps them. */
+static int read_sector_sized(FILE *file, int size, unsigned lba, unsigned char *out)
 {
     unsigned char raw[RAW_SECTOR];
-    if ((unsigned long long)lba * RAW_SECTOR > LONG_MAX) return 0;
-    if (fseek(file, (long)lba * RAW_SECTOR, SEEK_SET) || fread(raw, 1, RAW_SECTOR, file) != RAW_SECTOR) return 0;
-    memcpy(out, raw + USER_DATA, SECTOR);
-    return 1;
+    if (size == RAW_SECTOR) {
+        if ((unsigned long long)lba * RAW_SECTOR > LONG_MAX) return 0;
+        if (fseek(file, (long)lba * RAW_SECTOR, SEEK_SET) || fread(raw, 1, RAW_SECTOR, file) != RAW_SECTOR) return 0;
+        memcpy(out, raw + USER_DATA, SECTOR);
+        return 1;
+    }
+    if (size == ISO_SECTOR) {
+        if ((unsigned long long)lba * ISO_SECTOR > LONG_MAX) return 0;
+        if (fseek(file, (long)lba * ISO_SECTOR, SEEK_SET) || fread(raw, 1, ISO_SECTOR, file) != ISO_SECTOR) return 0;
+        memcpy(out, raw, SECTOR);
+        return 1;
+    }
+    return 0;
 }
-#define read_sector GameFiles_ReadSector
+
+int GameFiles_ReadSector(FILE *file, unsigned lba, unsigned char *out)
+{
+    return read_sector_sized(file, GameFiles_SectorSize(fileno(file)), lba, out);
+}
 
 /* The directory record called `name` (ISO 9660's ";1" left off) in the
  * directory at `lba`, `size` bytes: 1 with its place and size. */
-static int find_record(FILE *file, unsigned lba, unsigned size, const char *name, size_t length, unsigned *at,
-                       unsigned *record_size, int *directory)
+static int find_record(FILE *file, int sector_size, unsigned lba, unsigned size, const char *name,
+                       size_t length, unsigned *at, unsigned *record_size, int *directory)
 {
     unsigned char sector[SECTOR];
     unsigned done;
     if (size > 64 * SECTOR) return 0;
     for (done = 0; done < size; done += SECTOR) {
         unsigned offset = 0;
-        if (!read_sector(file, lba + done / SECTOR, sector)) return 0;
+        if (!read_sector_sized(file, sector_size, lba + done / SECTOR, sector)) return 0;
         while (offset < SECTOR && sector[offset]) {
             const unsigned char *record = sector + offset;
             size_t n;
@@ -77,13 +112,18 @@ int GameFiles_FindFile(FILE *file, const char *path, unsigned *lba, unsigned *si
     unsigned char sector[SECTOR];
     unsigned at, length;
     int directory = 1;
-    if (!read_sector(file, 16, sector) || sector[0] != 1 || memcmp(sector + 1, "CD001", 5)) return 0;
+    int sector_size = GameFiles_SectorSize(fileno(file));
+    if (!sector_size) return 0;
+    if (!read_sector_sized(file, sector_size, 16, sector) || sector[0] != 1 || memcmp(sector + 1, "CD001", 5))
+        return 0;
     at = le32(sector + 156 + 2);
     length = le32(sector + 156 + 10);
     while (*path) {
         const char *slash = strchr(path, '/');
         size_t n = slash ? (size_t)(slash - path) : strlen(path);
-        if (!directory || !find_record(file, at, length, path, n, &at, &length, &directory)) return 0;
+        if (!directory ||
+            !find_record(file, sector_size, at, length, path, n, &at, &length, &directory))
+            return 0;
         path += n + (slash != NULL);
     }
     if (directory) return 0;
@@ -104,20 +144,30 @@ static int is_the_disc(const char *path)
     FILE *file = fopen(path, "rb");
     unsigned lba, size;
     unsigned char header[SECTOR];
-    int yes;
+    int sector_size, yes;
     if (!file) return 0;
-    yes = find_executable(file, &lba, &size) && read_sector(file, lba, header) &&
+    sector_size = GameFiles_SectorSize(fileno(file));
+    yes = sector_size &&
+          find_executable(file, &lba, &size) &&
+          read_sector_sized(file, sector_size, lba, header) &&
           !memcmp(header, "PS-X EXE", 8) &&
-          read_sector(file, lba + (size - 1) / SECTOR, header);
+          read_sector_sized(file, sector_size, lba + (size - 1) / SECTOR, header);
     fclose(file);
     return yes;
 }
 
-static int ends_with_bin(const char *name)
+/* A file the port may take as the disc image: a .bin (raw MODE2) or an
+ * .iso (ISO 9660). */
+static int ends_with_image(const char *name)
 {
+    static const char *const suffixes[] = {".bin", ".BIN", ".Bin", ".iso", ".ISO", ".Iso"};
     size_t length = strlen(name);
-    return length > 4 && (!strcmp(name + length - 4, ".bin") || !strcmp(name + length - 4, ".BIN") ||
-                          !strcmp(name + length - 4, ".Bin"));
+    unsigned i;
+    for (i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+        size_t at = strlen(suffixes[i]);
+        if (length > at && !strcmp(name + length - at, suffixes[i])) return 1;
+    }
+    return 0;
 }
 
 /* The first image of the disc in a folder, trying the usual name first and
@@ -131,7 +181,7 @@ static int search(const char *folder)
     directory = opendir(folder);
     if (!directory) return 0;
     while ((entry = readdir(directory))) {
-        if (!ends_with_bin(entry->d_name) || strlen(entry->d_name) >= sizeof(best)) continue;
+        if (!ends_with_image(entry->d_name) || strlen(entry->d_name) >= sizeof(best)) continue;
         if (best[0] && strcmp(entry->d_name, best) >= 0) continue;
         if (snprintf(found, sizeof(found), "%s/%s", folder, entry->d_name) >= (int)sizeof(found)) continue;
         if (is_the_disc(found)) snprintf(best, sizeof(best), "%s", entry->d_name);
@@ -151,8 +201,8 @@ const char *GameFiles_Disc(char *why, size_t why_size)
             snprintf(found, sizeof(found), "%s", named);
             return found;
         }
-        snprintf(why, why_size, "MEMORIES_DISC names %s, which is not a raw image of the Forbidden Memories "
-                                "(USA) disc.", named);
+        snprintf(why, why_size, "MEMORIES_DISC names %s, which is not an image of the Forbidden Memories "
+                                "(USA) disc (.bin or .iso).", named);
         return NULL;
     }
     if (!Paths_User(folder, sizeof(folder), "disc-path.txt") && (saved = fopen(folder, "rb"))) {
@@ -176,9 +226,9 @@ const char *GameFiles_Disc(char *why, size_t why_size)
 #endif
     snprintf(why, why_size,
              "The game's disc image was not found.\n\n"
-             "This port needs your own copy of Yu-Gi-Oh! Forbidden Memories (USA, SLUS-01411) as a raw "
-             ".bin image (the .bin of a .bin/.cue pair). Put it in the \"game\" folder next to the "
-             "program:\n\n%s\n\nAny file name ending in .bin will do.",
+             "This port needs your own copy of Yu-Gi-Oh! Forbidden Memories (USA, SLUS-01411) as an image: "
+             "a raw .bin (the .bin of a .bin/.cue pair) or an .iso. Put it in the \"game\" folder next to the "
+             "program:\n\n%s\n\nAny file name ending in .bin or .iso will do.",
              folder);
     return NULL;
 }
@@ -191,7 +241,8 @@ int GameFiles_SelectDisc(const char *path, char *why, size_t why_size)
     int written;
     if (length >= sizeof(found) || !is_the_disc(path)) {
         snprintf(why, why_size, "That file could not be read as a Forbidden Memories (USA, SLUS-01411) disc.\n\n"
-                 "Choose the raw .bin file from your .bin/.cue pair, rather than the .cue file.");
+                 "Choose the raw .bin file from your .bin/.cue pair, or an .iso of the disc, rather than the "
+                 ".cue file.");
         return -1;
     }
     Paths_WriteBegin();
@@ -234,10 +285,13 @@ unsigned char *GameFiles_ReadExecutable(const char *disc, size_t *size)
     FILE *file = fopen(disc, "rb");
     unsigned lba, length, at;
     unsigned char *data = NULL;
+    int sector_size;
     if (!file) return NULL;
-    if (find_executable(file, &lba, &length) && (data = malloc((length + SECTOR - 1) / SECTOR * SECTOR))) {
+    sector_size = GameFiles_SectorSize(fileno(file));
+    if (sector_size && find_executable(file, &lba, &length) &&
+        (data = malloc((length + SECTOR - 1) / SECTOR * SECTOR))) {
         for (at = 0; at < length; at += SECTOR) {
-            if (!read_sector(file, lba + at / SECTOR, data + at)) {
+            if (!read_sector_sized(file, sector_size, lba + at / SECTOR, data + at)) {
                 free(data);
                 data = NULL;
                 break;

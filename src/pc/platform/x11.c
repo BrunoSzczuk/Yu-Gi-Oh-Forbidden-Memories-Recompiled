@@ -412,8 +412,8 @@ int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
 {
     (void)path;
     (void)size;
-    snprintf(why, why_size, "ROM setup needs the SDL build. Put your USA .bin disc image in the game folder "
-             "beside the program, or set MEMORIES_DISC to its path.");
+    snprintf(why, why_size, "ROM setup needs the SDL build. Put your USA .bin or .iso disc image in the game "
+             "folder beside the program, or set MEMORIES_DISC to its path.");
     return -1;
 }
 

@@ -536,7 +536,8 @@ static int take_disc(const char *uri, char *target, size_t target_size, char *wh
                      "Download folder first and choose it there.\n\n(%s)", said);
         } else {
             snprintf(why, why_size, "That file could not be read as a Forbidden Memories (USA, SLUS-01411) disc.\n\n"
-                     "Choose the raw .bin file from your .bin/.cue pair, rather than the .cue file.");
+                     "Choose the raw .bin file from your .bin/.cue pair, or an .iso of the disc, rather than the "
+                     ".cue file.");
             SDL_CloseIO(stream);
         }
         disc_call(DISC_CLOSE, NULL, 0, 0);
@@ -584,7 +585,7 @@ static int select_disc(int what, char *text, const char *record, char *target, s
     const SDL_MessageBoxData welcome = {
         SDL_MESSAGEBOX_INFORMATION, NULL, "Welcome to Forbidden Memories Recompiled",
         "Choose your copy of Yu-Gi-Oh! Forbidden Memories to begin.\n\n"
-        "Select the .bin file of your USA disc (SLUS-01411), the .bin of a .bin/.cue pair.\n\n"
+        "Select the .bin or .iso image of your USA disc (SLUS-01411).\n\n"
         "The game copies it into its own folder (about 500 MB), so you can remove the file you chose afterwards.",
         2, buttons, NULL
     };

@@ -2398,7 +2398,7 @@ static void SDLCALL disc_selected(void *userdata, const char *const *files, int 
     (void)filter;
     if (!files) {
         snprintf(selection->why, selection->why_size,
-                 "Could not open the ROM picker: %s\n\nYou can also put your .bin file in the game folder beside the program.",
+                 "Could not open the ROM picker: %s\n\nYou can also put your .bin or .iso file in the game folder beside the program.",
                  SDL_GetError());
         selection->result = -1;
     } else if (files[0]) {
@@ -2421,11 +2421,11 @@ int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
         {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"},
         {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Choose ROM..."}
     };
-    static const SDL_DialogFileFilter filters[] = {{"PlayStation disc image (.bin)", "bin;BIN"}};
+    static const SDL_DialogFileFilter filters[] = {{"PlayStation disc image (.bin, .iso)", "bin;BIN;iso;ISO"}};
     const SDL_MessageBoxData welcome = {
         SDL_MESSAGEBOX_INFORMATION, NULL, "Welcome to Forbidden Memories Recompiled",
         "Choose your copy of Yu-Gi-Oh! Forbidden Memories to begin.\n\n"
-        "Select the .bin ROM from your USA disc (SLUS-01411).\n"
+        "Select the .bin or .iso image of your USA disc (SLUS-01411).\n"
         "Your ROM stays where it is. We'll remember its location for next time.\n\n"
         "If you moved a previously selected ROM, choose its new location.",
         2, buttons, NULL
