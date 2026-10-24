@@ -13,24 +13,35 @@
  * as it was. */
 #include "message_wait.h"
 
-/* Whether the player has asked for the message to go on; the frames since
- * they did; the frames in a row the box has printed nothing; the letters the
- * box had printed when it was last seen printing. */
-static int asked;
-static unsigned since;
-static unsigned waited;
-static int printed;
+/* One wait: whether the player has asked for the message to go on; the
+ * frames since they did; the frames in a row the box has printed nothing;
+ * the letters the box had printed when it was last seen printing. */
+typedef struct {
+    int asked;
+    unsigned since;
+    unsigned waited;
+    int printed;
+} MessageWait;
 
-void MessageWait_Begin(void)
+static MessageWait waits[MESSAGE_WAIT_SLOTS];
+
+void MessageWait_Begin(int slot)
 {
-    asked = 0;
-    since = 0;
-    waited = 0;
-    printed = 0;
+    MessageWait *wait;
+    if (slot < 0 || slot >= MESSAGE_WAIT_SLOTS) return;
+    wait = &waits[slot];
+    wait->asked = 0;
+    wait->since = 0;
+    wait->waited = 0;
+    wait->printed = 0;
 }
 
-int MessageWait_Frame(int asked_now, int printed_now, int ended)
+int MessageWait_Frame(int slot, int asked_now, int printed_now, int ended)
 {
+    MessageWait *wait;
+    if (slot < 0 || slot >= MESSAGE_WAIT_SLOTS) return 0;
+    wait = &waits[slot];
+
     /* The box ended its text: the retail's own wait for the player's press
      * goes on as it always did. */
     if (ended) return 0;
@@ -38,25 +49,25 @@ int MessageWait_Frame(int asked_now, int printed_now, int ended)
     /* The player asked for the message to go on. A message the player is
      * still reading is left alone. */
     if (asked_now) {
-        asked = 1;
-        since = 0;
+        wait->asked = 1;
+        wait->since = 0;
     }
-    if (asked == 0) return 0;
-    since++;
+    if (wait->asked == 0) return 0;
+    wait->since++;
 
     /* A letter came: the box is still printing, so the wait goes on. */
-    if (printed_now != printed) {
-        printed = printed_now;
-        waited = 0;
+    if (printed_now != wait->printed) {
+        wait->printed = printed_now;
+        wait->waited = 0;
     } else {
-        waited++;
+        wait->waited++;
     }
 
     /* The box printed nothing for two seconds: it will print nothing more,
      * and the game goes on without it. */
-    if (waited >= MESSAGE_WAIT_FRAMES) return 1;
+    if (wait->waited >= MESSAGE_WAIT_FRAMES) return 1;
 
     /* The wait has lasted thirty seconds: the game goes on. */
-    if (since >= MESSAGE_WAIT_LIMIT) return 1;
+    if (wait->since >= MESSAGE_WAIT_LIMIT) return 1;
     return 0;
 }
