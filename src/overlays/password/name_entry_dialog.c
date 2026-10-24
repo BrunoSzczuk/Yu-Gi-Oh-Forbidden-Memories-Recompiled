@@ -61,7 +61,7 @@ void NameEntry_UpdateDialog(void)
         if ((flags & 4) == 0) {
             D_8016D400 = flags | 4;
 #ifdef MEMORIES_PC
-            MessageWait_Begin();
+            MessageWait_Begin(MESSAGE_WAIT_NAME_ENTRY);
 #endif
             func_8003B6AC(2, 2);
             box = TextBox_Create(2, D_8016D4D2 & 0xFFF, 16, 248,
@@ -140,6 +140,7 @@ void NameEntry_UpdateDialog(void)
                  * A box whose text has ended (the retail's own text) waits
                  * for the player's dismiss, as it always did. */
                 if (MessageWait_Frame(
+                        MESSAGE_WAIT_NAME_ENTRY,
                         (gInput_wPad1Pressed & PAD_BUTTON_CONFIRM_MASK) != 0,
                         box->field_60,
                         (*(u32 *)&box->flags_34 & TEXT_BOX_FLAG_DONE) != 0)) {
@@ -151,7 +152,7 @@ void NameEntry_UpdateDialog(void)
         }
 #ifdef MEMORIES_PC
     acknowledged:
-        MessageWait_Begin();
+        MessageWait_Begin(MESSAGE_WAIT_NAME_ENTRY);
 #endif
         if (D_8009B34D != 0) {
             fd = D_8016D400;
